@@ -1,5 +1,7 @@
 # AgentMesh Background Information
 
+> **Archived — historical Q&A, superseded by the MCP-server pivot decision (2026-07-23).** This doc's SMB-mount-by-every-client model (mount_smbfs, cifs-utils, `net use`, SMB provisioning) no longer applies: only the Mac mini ever touches the mesh root now, reached by other machines through a local MCP server (Ollama tooling via an HTTP wrapper) over Tailscale. See `../PROBLEM_STATEMENT.md` and `../../AGENTS.md`'s "Architecture decision" section for the current design. Kept for the original problem-framing Q&A, which is still accurate.
+
 Q: Can I use a Mac shared folder as a communication path for multiple agents and computers?
 A: Yes, you can use a Mac shared folder as an indirect memory and communication path for multiple agents and computers. However, because agents (like LLM-based assistants) lack native file-locking awareness by default, this approach requires structured setups to prevent race conditions and file overwrites.
 

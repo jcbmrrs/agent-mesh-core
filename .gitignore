@@ -4,7 +4,7 @@
 .env.*
 !.env.example
 
-# live AgentMesh runtime data (per PROJECT-SETUP.md) — never track agent state/messages/locks
+# live AgentMesh runtime data (per docs/archive/PROJECT-SETUP.md) — never track agent state/messages/locks
 .tmp_*
 *.lock
 agents/

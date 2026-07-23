@@ -2,15 +2,15 @@
 
 ## Context
 
-`agent-mesh-core` currently contains only design docs (`BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`) describing a multi-agent coordination mesh: an SMB-shared directory (via Tailscale, no port forwarding) where Claude Code / Codex / Ollama instances on different machines exchange JSON messages and state without ever writing concurrently to one shared mutable file. The core risk the design guards against is SMB's inconsistent cross-platform locking (AFP vs POSIX vs Windows oplocks) — solved via per-agent inboxes, atomic temp-file-then-rename writes, and directory-creation-based (`mkdir`/`rmdir`) locking.
+`agent-mesh-core` describes a multi-agent coordination mesh: a shared directory where Claude Code / Codex / Ollama instances on different machines exchange JSON messages and state without ever writing concurrently to one shared mutable file. **As of the MCP-server pivot decision (2026-07-23, see `PROBLEM_STATEMENT.md`), only the Mac mini ever touches that directory on local disk** — other machines reach it through a local MCP server process (Ollama-backed tooling via a thin HTTP wrapper around the same functions), not by mounting it over SMB. The original design docs (now archived: `docs/archive/BACKGROUND.md`, `docs/archive/MULTI-AGENT-GUIDE.md`, `docs/archive/PROMPT.md`) described an SMB-shared directory mounted by every machine, guarding against SMB's inconsistent cross-platform locking (AFP vs POSIX vs Windows oplocks). That risk category no longer applies — the mailbox/lock/atomic-write patterns below are retained as good local-filesystem hygiene, not as SMB defenses.
 
-Nothing has been implemented yet. This plan builds the full PROMPT.md scope as an installable, uv-managed Python package with a strict TDD test suite, so the coordination logic is proven correct before it ever touches a real SMB mount.
+Nothing has been implemented yet. This plan builds the coordinator + inbox scanning + `local_rules.json` template generator as an installable, uv-managed Python package with a strict TDD test suite, so the coordination logic is proven correct before it's wrapped in the (separately-designed) MCP server.
 
 **Confirmed scope decisions** (already agreed, not open for re-litigation):
-- Full PROMPT.md scope: coordinator + inbox scanning + `local_rules.json` template generator + macOS SMB provisioning script.
+- Coordinator + inbox scanning + `local_rules.json` template generator, wrapped by an MCP server (`mcp_server.py`, design pending — see "Resolved after MCP-server pivot decision"). No macOS SMB provisioning script — that scope is dropped, not deferred.
 - uv-managed package: `pyproject.toml`, `src/agent_mesh_core/` layout, pytest + ruff.
 - Mesh root is always a configurable path; tests use `tmp_path`, never a real `/Users/Shared/AgentMesh`.
-- Per `PROJECT-SETUP.md`: this repo is the source-of-truth zone (code + templates + `deploy.sh`); `/Users/Shared/AgentMesh` is the live, git-ignored data zone, populated only via `deploy.sh` → the packaged bootstrap entrypoint. See `AGENTS.md`'s "Repo vs. live share split" section.
+- This repo is the source-of-truth zone (code + templates + `deploy.sh`); `/Users/Shared/AgentMesh` is the live, git-ignored data zone on the Mac mini, populated only via `deploy.sh` → the packaged bootstrap entrypoint. See `AGENTS.md`'s "Repo vs. live share split" section.
 
 **Resolved after adversarial review (`PLAN_FEEDBACK.md`):**
 - **No executable code is ever deployed into `/Users/Shared/AgentMesh`, full stop.** The live share is data-only (`agents/*/state.json`, `agents/*/inbox/*`, `locks/`, `config/local_rules.json`). Every machine that participates runs the package from its own git checkout (`git pull` + `uv sync`); `deploy.sh` only ever writes data. `PROMPT.md`'s literal `/Users/Shared/AgentMesh/agent_core.py` path is permanently superseded, not "later" satisfied — there is no compat shim.
@@ -55,13 +55,21 @@ Nothing has been implemented yet. This plan builds the full PROMPT.md scope as a
 - **Ignored inbox files are now reported, not silently dropped.** `InboxScanResult` gains an `ignored` list (filenames skipped as stray `.tmp_*`/hidden/already-in-`.processing`), so a message that unexpectedly lands with a dot-prefixed name is diagnosable instead of silently invisible forever.
 - **`smb_provision.py`'s console script is renamed** from `agent-mesh-provision-smb` to `agent-mesh-smb-commands` — the old name implied it performs provisioning; the new one matches what it actually does (emits/validates commands, applies nothing).
 
+**Resolved after MCP-server pivot decision (2026-07-23, see `PROBLEM_STATEMENT.md` and `SOLUTION_RECOMMENDATION.md`):**
+- **Transport changes; the reviewed coordination logic does not.** Other machines (MBP, future Linux/Windows boxes) no longer mount `/Users/Shared/AgentMesh` over SMB at all. Instead, a single MCP server process runs on the Mac mini and wraps `AgentMeshCoordinator`'s methods as MCP tools; Claude Code and Codex on other machines register that server (reached over the Mac mini's Tailscale IP/MagicDNS name) exactly as they'd register any other MCP server. Ollama-backed tooling, which doesn't speak MCP, gets a thin HTTP wrapper exposing the same underlying functions as routes. **No machine other than the Mac mini ever touches the mesh root directly** — the coordinator now always runs against local POSIX disk.
+- **This removes an entire risk category rather than just mitigating it.** The four adversarial reviews spent real effort hardening cross-platform SMB behavior (AFP/POSIX/oplock inconsistency, unverified rename atomicity over SMB2/3, clock skew across machines for staleness heuristics). None of that risk exists once the coordinator only ever runs on local disk on one machine. The lock-token, atomic-write-with-fsync, claim-directory, and name-validation logic **all still apply as-is** — they were always good local-filesystem hygiene, not solely SMB defenses — they just stop needing to defend against a network mount.
+- **SMB provisioning scope is dropped, not deferred.** `smb_provision.py`, `scripts/provision_smb_share.py`, and the `agent-mesh-smb-commands` console script are **removed from scope entirely** — there is no share for any client to mount, so there is nothing to provision. This is a scope reduction, not a v2 deferral.
+- **A new module, `mcp_server.py`, is added to the package** to expose the runtime-facing coordinator methods (`acquire_lock`/`release_lock`, `update_state`, `send_message`, `scan_and_clear_inbox`) as MCP tools. `recover_processing` and `bootstrap_mesh` are **not** exposed as MCP tools — they remain operator/admin-only, invoked directly by a human on the Mac mini, consistent with their existing "never called by routine agent processes" rule. Detailed TDD cycles for `mcp_server.py` are a follow-up planning pass (this module's tool-registration/dispatch shape needs its own design work before it can be micro-cycled) — not yet added to the "TDD cycle sequence" below.
+- **`deploy.sh`'s job gets simpler, not different in kind.** It still runs locally, on the Mac mini, and still does exactly one thing: invoke `agent-mesh-bootstrap` to populate the live share's data. The only change is that "the mesh root mounted" no longer means "mounted by some other machine over SMB" — it's just a local path on the same machine that's about to run the MCP server. No other machine's `deploy.sh` step exists; other machines don't run `deploy.sh` at all now, since they never touch the mesh root.
+- **HTTP wrapper for Ollama tooling is new, small, separate scope.** A thin set of HTTP routes (same underlying calls the MCP tools make) for non-MCP local tooling. Not detailed in this plan's TDD cycles yet — follow-up work once `mcp_server.py`'s shape is settled, since the HTTP wrapper should share a dispatch layer with the MCP tool wrapper rather than duplicating logic.
+
 ## Repo layout
 
 ```
 agent-mesh-core/
 ├── pyproject.toml
 ├── .gitignore
-├── deploy.sh                        # thin, local-only: invoke `agent-mesh-bootstrap` against the mounted share
+├── deploy.sh                        # thin, local-only: invoke `agent-mesh-bootstrap` against the local mesh root
 ├── src/agent_mesh_core/
 │   ├── __init__.py
 │   ├── names.py             # validate_name(): strict portable regex + Windows-reserved-name/lowercase checks
@@ -69,11 +77,9 @@ agent-mesh-core/
 │   ├── inbox.py             # scan_and_clear_inbox + InboxScanResult (claim into .processing/<claim_id>/ dirs) + recover_processing()
 │   ├── rules_template.py    # local_rules.json generator/writer
 │   ├── bootstrap.py         # bootstrap_mesh(): wires coordinator init + rules template + default agent dirs
-│   ├── smb_provision.py     # sharing/dscl command builders + provision_share(runner=...)
+│   ├── mcp_server.py        # planned: wraps runtime-facing coordinator methods as MCP tools (design not yet detailed — see "Resolved after MCP-server pivot decision")
 │   └── templates/
-│       └── local_rules.template.json    # master template PROJECT-SETUP.md refers to as src/templates/
-├── scripts/
-│   └── provision_smb_share.py   # thin CLI wrapper, subprocess.run as the real runner
+│       └── local_rules.template.json    # master template referenced by the archived PROJECT-SETUP.md as src/templates/
 └── tests/
     ├── conftest.py
     ├── test_names.py
@@ -84,14 +90,15 @@ agent-mesh-core/
     ├── test_coordinator_send_message.py
     ├── test_inbox_scan.py
     ├── test_rules_template.py
-    ├── test_smb_provision.py
     ├── test_bootstrap.py
     └── test_bootstrap_integration.py
 ```
 
-`PROMPT.md` literally names a deployed `/Users/Shared/AgentMesh/agent_core.py`. That path is **not built** — see "Resolved after adversarial review" above. Every machine runs `agent_mesh_core` from its own git checkout; the live share never contains code.
+`smb_provision.py`, `scripts/provision_smb_share.py`, and `test_smb_provision.py` are **dropped from scope** (see "Resolved after MCP-server pivot decision") — no client ever mounts the mesh root, so there is nothing to provision.
 
-`PROJECT-SETUP.md`'s draft `deploy.sh` directly `cp`s a flat `agent_core.py` and does its own `[ -f ... ]` existence check before copying `local_rules.json`. Both parts are superseded: no code is copied anywhere (see above), and the "don't overwrite an existing config" rule is already a tested unit (`rules_template.write_local_rules_template`'s `force=False` default). `deploy.sh` runs locally on one already-set-up machine and calls the `agent-mesh-bootstrap` console script to populate the share's data — nothing more. It does not `cp` code, does not touch any other machine, and does not reimplement any logic itself. Getting the package onto a given machine (Mac mini, MBP, future Linux/Windows box) is a separate manual `git pull && uv sync`, run independently on that machine — not `deploy.sh`'s concern.
+The archived `PROMPT.md` literally names a deployed `/Users/Shared/AgentMesh/agent_core.py`. That path is **not built** — see "Resolved after adversarial review" above. Every machine either runs the MCP server (Mac mini only) or reaches it as a registered MCP client (everyone else); the live share never contains code and, now, is never mounted by any machine but the Mac mini.
+
+The archived `PROJECT-SETUP.md`'s draft `deploy.sh` directly `cp`s a flat `agent_core.py` and does its own `[ -f ... ]` existence check before copying `local_rules.json`. Both parts are superseded: no code is copied anywhere (see above), and the "don't overwrite an existing config" rule is already a tested unit (`rules_template.write_local_rules_template`'s `force=False` default). `deploy.sh` runs locally on the Mac mini and calls the `agent-mesh-bootstrap` console script to populate the mesh root's data — nothing more. It does not `cp` code and does not reimplement any logic itself. Other machines don't run `deploy.sh` at all — they never touch the mesh root, only the MCP server (or HTTP wrapper, for Ollama tooling) that fronts it.
 
 ## Logic Gate triage
 
@@ -104,14 +111,14 @@ agent-mesh-core/
 - Inbox claim-then-process — atomic claim via `mkdir` (with bounded retry on claim-ID collision) + rename into `.processing/<claim_id>/` + sidecar write, delete-after-success, malformed JSON quarantined (not left in place), tolerating concurrent-claim races and all four orphan shapes (empty claim dir, message-without-sidecar, message-with-malformed-sidecar, complete claim), documented best-effort-only ordering, ignored files reported not dropped
 - `recover_processing` — reports/requeues/quarantines claims (uniformly across all orphan shapes, including empty claim dirs) by age threshold (heuristic only) or by explicit `claim_ids` override, failing closed on a requeue/quarantine destination collision; never invoked automatically
 - `local_rules.json` generation — default content, deep-merge of overrides, refuse-to-overwrite without `force`
-- SMB command construction — argument lists, input validation, orchestration over an injected runner (dry-run generator; no real provisioning)
 - `bootstrap_mesh` orchestration — which agent dirs get created (with duplicate-after-normalization rejection), call order (coordinator init before rules template), and that it surfaces (not swallows) a refuse-to-overwrite error from the rules template step
+
+**Dropped from scope (MCP-server pivot):**
+- SMB command construction (`smb_provision.py`) — no share is ever mounted by a client, so there's nothing to provision or test.
 
 **Does not pass the gate (write directly, minimal/no unit tests):**
 - `mkdir(parents=True, exist_ok=True)` calls in `__init__` (one smoke test)
 - Actual `os.mkdir`/`os.rmdir` syscalls
-- Actual `subprocess` invocation of `sharing`/`dscl` (unsafe to exercise in CI)
-- `scripts/provision_smb_share.py` (thin delegation)
 - `deploy.sh` itself (shell orchestration only — invoking the already-tested `agent-mesh-bootstrap` entrypoint locally, nothing more)
 
 ## Test infrastructure
@@ -145,24 +152,24 @@ agent-mesh-core/
 ### `rules_template.py`
 9. `test_rules_template.py` — default output has required top-level keys (`schema_version`, `network_context`, `model_overrides`, `file_tree_exclusions`); standard exclusion patterns present (`.git`, `__pycache__`, `.venv`, `node_modules`); deep-merge of overrides preserves defaults; override values take precedence; `write_local_rules_template` refuses to overwrite without `force=True`, overwrites when `force=True`; delegates to `atomic_write_json` (spy-isolated).
 
-### `smb_provision.py`
-10. `test_smb_provision.py` — expected `sharing`/`dscl` CLI arg lists for add-share, enable-SMB, grant-access; `ValueError` on empty share name or path outside an allowed root; `provision_share(runner=...)` calls the injected runner once per command in the correct order; stops on first nonzero return code without invoking later commands, error includes captured stderr. This module is a **dry-run command generator/validator, not a provisioning tool** — real macOS privilege/ACL/version behavior is not exercised by tests and is explicitly out of scope.
-
 ### `bootstrap.py`
-11. `test_bootstrap.py` — `bootstrap_mesh(mesh_root, agent_ids, rules_overrides=None, force_rules=False)` creates a coordinator (and thus `agents/<id>/inbox/`, `locks/`) for every id in `agent_ids`, validating each via `validate_name`; rejects `agent_ids` that collide after lowercase normalization (e.g. `agent_mbp` + `Agent_MBP`) before creating anything; writes `config/local_rules.json` via `rules_template` exactly once; raises (does not swallow) `FileExistsError` from the rules-template step when `local_rules.json` already exists and `force_rules=False`; passing `force_rules=True` overwrites it; call order is coordinator/dir creation before the rules-template write.
+10. `test_bootstrap.py` — `bootstrap_mesh(mesh_root, agent_ids, rules_overrides=None, force_rules=False)` creates a coordinator (and thus `agents/<id>/inbox/`, `locks/`) for every id in `agent_ids`, validating each via `validate_name`; rejects `agent_ids` that collide after lowercase normalization (e.g. `agent_mbp` + `Agent_MBP`) before creating anything; writes `config/local_rules.json` via `rules_template` exactly once; raises (does not swallow) `FileExistsError` from the rules-template step when `local_rules.json` already exists and `force_rules=False`; passing `force_rules=True` overwrites it; call order is coordinator/dir creation before the rules-template write.
 
 ### Integration (smoke-level, not micro-cycled)
-12. `test_bootstrap_integration.py` — one end-to-end run of `bootstrap_mesh` against `tmp_path` asserting the full real directory tree + a valid `local_rules.json`, for the three default agent ids (`agent_mac_mini`, `agent_mbp`, `agent_ollama_local`). No code-deployment shim exists or is tested — the live share is data-only.
+11. `test_bootstrap_integration.py` — one end-to-end run of `bootstrap_mesh` against `tmp_path` asserting the full real directory tree + a valid `local_rules.json`, for the three default agent ids (`agent_mac_mini`, `agent_mbp`, `agent_ollama_local`). No code-deployment shim exists or is tested — the live share is data-only.
+
+### `mcp_server.py` (follow-up planning pass, not yet cycled)
+12. Not yet TDD-cycled: this module's tool-registration/dispatch design (which coordinator methods become MCP tools, request/response shape, error mapping) needs its own design pass before it can be broken into Iron Rule cycles the way the modules above were. Placeholder only — see "Resolved after MCP-server pivot decision" above.
 
 ## Tooling setup
 
 1. Author `pyproject.toml` by hand (repo already has content, don't `uv init` over it): `hatchling` build backend, `requires-python = ">=3.11"`, src-layout pointing at `src/agent_mesh_core`.
 2. Dev deps via `uv add --dev pytest ruff` once the file exists.
-3. `[project.scripts]` entries: `agent-mesh-smb-commands = "agent_mesh_core.smb_provision:main"` (renamed from an earlier `agent-mesh-provision-smb` — the old name implied it performs provisioning, which it never does) and `agent-mesh-bootstrap = "agent_mesh_core.bootstrap:main"` (the latter is what `deploy.sh` invokes).
+3. `[project.scripts]` entry: `agent-mesh-bootstrap = "agent_mesh_core.bootstrap:main"` (what `deploy.sh` invokes). An `mcp_server.py` entry point will be added once that module's design pass lands.
 4. `[tool.pytest.ini_options] testpaths = ["tests"]`; `[tool.ruff]` with `select = ["E", "F", "I"]`.
-5. `.gitignore` (already applied — see repo's `.gitignore`): runtime paths from `PROJECT-SETUP.md` (`.tmp_*`, `*.lock`, `agents/`, `locks/`, `config/*.json` except `*.template.json`), plus standard Python/OS ignores, per `BACKGROUND.md`'s instruction to never track the live execution directory.
+5. `.gitignore` (already applied — see repo's `.gitignore`): runtime paths from the archived `PROJECT-SETUP.md` (`.tmp_*`, `*.lock`, `agents/`, `locks/`, `config/*.json` except `*.template.json`), plus standard Python/OS ignores, per the archived `BACKGROUND.md`'s instruction to never track the live execution directory.
 6. `uv sync`, then `uv run pytest` / `uv run ruff check .` as the ongoing dev loop.
-7. `deploy.sh` — a thin, single-purpose, *local* wrapper (not a TDD cycle): run on a machine that already has this repo cloned/updated and `uv sync`'d, with `/Users/Shared/AgentMesh` mounted. It runs exactly one command: `uv run agent-mesh-bootstrap --mesh-root /Users/Shared/AgentMesh --agent-ids agent_mac_mini,agent_mbp,agent_ollama_local`. It does not `git pull`, does not touch any other machine, and does not distribute code — getting the package onto each participating machine is a separate, manual, per-machine step. All the logic `deploy.sh` depends on (directory creation, refuse-to-overwrite config, duplicate-ID rejection) is already covered by `test_bootstrap.py` and lower-level unit tests.
+7. `deploy.sh` — a thin, single-purpose, *local* wrapper (not a TDD cycle): run on the Mac mini, which already has this repo cloned/updated and `uv sync`'d, with `/Users/Shared/AgentMesh` as a local path (no mount involved — only the Mac mini ever touches it). It runs exactly one command: `uv run agent-mesh-bootstrap --mesh-root /Users/Shared/AgentMesh --agent-ids agent_mac_mini,agent_mbp,agent_ollama_local`. All the logic `deploy.sh` depends on (directory creation, refuse-to-overwrite config, duplicate-ID rejection) is already covered by `test_bootstrap.py` and lower-level unit tests.
 
 ## Verification
 
@@ -172,4 +179,5 @@ agent-mesh-core/
 - Manual smoke: run `deploy.sh` against a scratch directory (not the real `/Users/Shared/AgentMesh`) to confirm it produces the same tree `test_bootstrap_integration.py` asserts, then re-run it to confirm `local_rules.json` is left untouched (no `force_rules`).
 - Manual smoke: simulate each of the four crash points by hand (empty `.processing/<claim_id>/`; message present with no sidecar; message present with a malformed sidecar; complete claim), confirm `scan_and_clear_inbox` leaves all four alone, then confirm `recover_processing` handles each correctly (dry-run report, then `requeue`/`quarantine`, including the destination-collision-raises case) both via age threshold and via explicit `claim_ids`. Confirm a *fresh* empty claim dir (simulating a live scanner mid-claim) is left alone by a default-threshold `recover_processing` call.
 - Manual smoke: force a lock-token-write failure and confirm `acquire_lock` leaves no orphaned lock dir; manually place an extra file in an otherwise-releasable lock dir and confirm `release_lock` raises instead of deleting it.
-- SMB provisioning script is **not** run for real during this task — command construction is verified via the injected-runner unit tests only; actual `sharing`/`dscl` execution is a manual follow-up on the Mac mini itself, outside this plan's scope.
+- SMB provisioning is out of scope entirely now (see "Resolved after MCP-server pivot decision") — no verification step needed.
+- Not yet covered here: end-to-end verification of the MCP server itself (tool registration reachable from a real Claude Code/Codex client over Tailscale) and the Ollama HTTP wrapper — both follow once `mcp_server.py`'s design pass lands.

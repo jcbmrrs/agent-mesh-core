@@ -1,6 +1,6 @@
 # Role & Goal
 
-> **Superseded — historical draft, do not implement literally.** Steps 3–4 below ask for code and config to be written directly into the live share; see the "Amendment" at the bottom, `IMPLEMENTATION_PLAN.md`, and `AGENTS.md` for the actual v1 design (no code is ever placed in `/Users/Shared/AgentMesh`; it's data-only).
+> **Superseded — historical draft, do not implement literally.** Steps 3–4 below ask for code and config to be written directly into the live share; see the "Amendment" at the bottom, `../IMPLEMENTATION_PLAN.md`, and `../../AGENTS.md` for the actual v1 design (no code is ever placed in `/Users/Shared/AgentMesh`; it's data-only). **Doubly superseded as of the MCP-server pivot decision (2026-07-23):** the SMB-mount transport assumed throughout (clients mounting `/Users/Shared/AgentMesh` over SMB) is dropped — only the Mac mini ever touches the mesh root, reached by every other machine through an MCP server (Ollama tooling via an HTTP wrapper). See `../PROBLEM_STATEMENT.md`.
 
 You are an expert systems automation engineer setting up a multi-agent file-mesh infrastructure on this host Mac mini. The objective is to establish an always-on, zero-port-forwarding, Tailscale SMB-accessible data directory structured for agent communication (Claude Code, Codex, Ollama cluster) via text, settings, and JSON file primitives.
 
