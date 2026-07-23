@@ -1,5 +1,7 @@
 # Multi-Agent Tailscale SMB Coordination Guide
 
+> **Superseded — historical draft, do not implement as-is.** The Python boilerplate below (PID-based temp filenames, `shutil.move`, unvalidated `agent_id`/path components, read-then-delete inbox handling, no name validation) is the original draft this project started from. It has known correctness problems that `IMPLEMENTATION_PLAN.md` and `AGENTS.md` fix — path-safe name validation, `tempfile.mkstemp`+`os.replace` with fsync, atomic claim-before-process inbox scanning, a lock handle API, etc. Read this file for the *directory topology* and original intent only; for the actual v1 design, see `IMPLEMENTATION_PLAN.md` (build plan) and `AGENTS.md` (current invariants).
+
 ## 1. System Architecture
 To avoid file-locking conflicts across macOS, Windows, and Linux, agents do not share a single monolithic state file. Instead, they communicate using an **isolated inbox topology** and **directory-based atomic operations.**
 

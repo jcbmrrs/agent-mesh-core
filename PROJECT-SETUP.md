@@ -1,5 +1,7 @@
 # Agent Mesh Core Project Set-up
 
+> **Superseded — historical draft, do not implement as-is.** The `deploy.sh` below (flat `cp` of `src/agent_core.py`, bash `[ -f ... ]` existence check for `local_rules.json`) and the repo layout it assumes are both superseded. Real source is the `src/agent_mesh_core/` uv package (not a flat script); the overwrite guard lives in tested Python (`rules_template.write_local_rules_template`'s `force` flag), not bash; and `deploy.sh`'s actual, narrower job is defined in `IMPLEMENTATION_PLAN.md`'s "Resolved after second adversarial review" section. Read this file for the *why* (clean context windows, revertible logic, git-clone-per-machine) — the mechanics are in `IMPLEMENTATION_PLAN.md`.
+
 ## The Recommended Architecture
 Keep your project split cleanly into two distinct zones:
 

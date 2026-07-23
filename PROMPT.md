@@ -1,4 +1,7 @@
 # Role & Goal
+
+> **Superseded — historical draft, do not implement literally.** Steps 3–4 below ask for code and config to be written directly into the live share; see the "Amendment" at the bottom, `IMPLEMENTATION_PLAN.md`, and `AGENTS.md` for the actual v1 design (no code is ever placed in `/Users/Shared/AgentMesh`; it's data-only).
+
 You are an expert systems automation engineer setting up a multi-agent file-mesh infrastructure on this host Mac mini. The objective is to establish an always-on, zero-port-forwarding, Tailscale SMB-accessible data directory structured for agent communication (Claude Code, Codex, Ollama cluster) via text, settings, and JSON file primitives.
 
 # System Context
@@ -34,7 +37,7 @@ Please execute the following steps sequentially directly on this system:
 
 Verify your creations by checking directory structures and mocking an atomic write test script to ensure operations run without warnings.
 
-## Amendment (per PROJECT-SETUP.md)
+## Amendment (per PROJECT-SETUP.md and two rounds of adversarial review — see PLAN_FEEDBACK.md, PLAN_FEEDBACK-2.md)
 
-Steps 3 and 4 above, read literally, have an agent write `agent_core.py` and `config/local_rules.json` directly into the live `/Users/Shared/AgentMesh` share. That's superseded: source code and templates are developed and version-controlled in this git repo (see `IMPLEMENTATION_PLAN.md` for the `src/agent_mesh_core/` package layout), and a `deploy.sh` script pushes them out to the live share. The live share itself is never a git-tracked directory — see `.gitignore` and `AGENTS.md`'s "Repo vs. live share split" section for why. Step 4's "don't overwrite existing config" caveat is implemented once, in Python (`rules_template.write_local_rules_template`'s `force` flag), and reused by both the deploy path and any bootstrap tooling — not reimplemented as a bash existence check.
+Steps 3 and 4 above, read literally, have an agent write `agent_core.py` and `config/local_rules.json` directly into the live `/Users/Shared/AgentMesh` share. That's superseded, with a firm final call: **no executable code is ever placed in `/Users/Shared/AgentMesh` — it is data-only, permanently.** Source code and templates are developed and version-controlled in this git repo (see `IMPLEMENTATION_PLAN.md` for the `src/agent_mesh_core/` package layout). Each participating machine gets the code via its own independent `git clone`/`git pull` + `uv sync` — that is a per-machine, per-operator action, not something any script pushes out. `deploy.sh` has exactly one job: run locally on a machine that already has the package installed and the share mounted, and populate the live share's *data* (`agents/*/`, `locks/`, `config/local_rules.json`) by invoking the `agent-mesh-bootstrap` console script. It never copies code anywhere. The live share itself is never a git-tracked directory — see `.gitignore` and `AGENTS.md`'s "Repo vs. live share split" section for why. Step 4's "don't overwrite existing config" caveat is implemented once, in Python (`rules_template.write_local_rules_template`'s `force` flag), and reused by `bootstrap_mesh` — not reimplemented as a bash existence check. Note also that `bootstrap_mesh`/`agent-mesh-bootstrap` is operator/admin tooling invoked deliberately against a specific mesh root — it is not part of the runtime API any agent process calls during normal operation.
 
