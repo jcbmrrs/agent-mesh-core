@@ -127,27 +127,63 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   is written **atomically, using the same `atomic_write_json` primitive as
   everything else** (not a bespoke write path), and returns the claimed
   messages (still on disk, not yet deleted) together with their claim IDs
-  and tokens. `max_messages` defaults to a conservative 50 and bounds a
-  single call's response size and `.processing/` growth — a caller wanting
-  more just calls again. Each stored message body is capped at a
-  documented max serialized size (see the envelope bullet below);
-  `claim_inbox_messages` never has to handle an oversized message, because
-  `send_message` already refused to write one.
+  and tokens.
+
+  **`max_messages` bounds attempted claims, not just successfully-returned
+  ones** — this distinction matters because a sidecar-write failure (see
+  below) removes a message from the inbox without returning it, and
+  bounding only successful returns would let a run of failures move an
+  unbounded number of messages out of the inbox while chasing 50
+  successes. Concretely: `claim_inbox_messages` looks at at most
+  `max_messages` eligible source messages in one call, full stop — some
+  subset of those may fail their sidecar write and become orphans instead
+  of being returned, but the total moved out of the inbox in one call
+  is still bounded by `max_messages`. A separate `max_attempts`/
+  `max_failures` knob was considered and rejected as unnecessary
+  additional configuration surface: bounding the one number that already
+  exists is enough to close the failure mode. **`max_messages` itself is
+  validated as caller input**: it must be an integer with
+  `1 <= max_messages <= MAX_CLAIM_BATCH_SIZE` (a module-level constant,
+  `50` — the same as the default, since nothing in scope needs a caller
+  to ask for more); zero, negative, non-integer, or over-the-cap values
+  raise `ValueError` before the inbox is touched at all. Each stored
+  message body is capped at a documented max serialized size (see the
+  envelope bullet below); `claim_inbox_messages` never has to handle an
+  oversized message, because `send_message` already refused to write one.
 
   `acknowledge_claims(agent_id, [{claim_id, claim_token}, ...])` is a
   separate call that deletes the message + sidecar + claim dir for each
   given `(claim_id, claim_token)` pair, and reports — per item, not as a
-  single all-or-nothing result — one of: acknowledged, not-found (claim ID
-  doesn't exist: already acknowledged, or never valid), or
-  token-mismatch (claim ID exists but the token doesn't match). **The
-  token is an integrity check, not a security boundary** — nothing here
-  defends against a hostile caller (see "MCP/HTTP API design" below for
-  why that's out of scope); its job is to stop a *buggy* client — wrong
-  cached claim ID, stale list, copy-paste error — from silently deleting
-  a claim it never actually made, which plain `agent_id` + `claim_id`
-  wouldn't have caught since `agent_id` is already an unverified,
-  caller-asserted parameter. A token mismatch never deletes anything; it's
-  reported so the caller (or a human reading logs) notices the bug.
+  single all-or-nothing result — one of: `acknowledged`; `not-found`
+  (claim ID doesn't exist at all: already acknowledged, or never valid);
+  `token-mismatch` (a *complete* claim exists — valid sidecar, readable
+  token — but the given token doesn't match it); or `unacknowledgeable`
+  (the claim directory exists but isn't in a state a token comparison can
+  even be performed against — one of the three orphan shapes
+  `recover_processing` already understands: empty dir, message-without-
+  sidecar, or message-with-malformed-sidecar — reported with which shape,
+  reusing the same shape vocabulary as recovery rather than inventing
+  three new status strings). **`unacknowledgeable` claims are left
+  completely untouched by `acknowledge_claims`** — it never deletes
+  anything it can't verify a token against; the caller's only path forward
+  for those is the operator-invoked `recover_processing`, same as any
+  other orphan. **A caller-supplied `claim_token` is validated as input,
+  not just compared**: it must be a non-empty string, or `acknowledge_claims`
+  raises `ValueError` before reading/deleting anything — a well-formed but
+  wrong string is a normal `token-mismatch`/`not-found` result, not an
+  error. Generated `claim_token`s are `secrets.token_hex(16)` (32
+  lowercase hex characters) — high-entropy and opaque, matching the
+  charset (though not the purpose) of generated claim IDs for one
+  consistent "these are machine-generated identifiers, not human input"
+  family. **The token is an integrity check, not a security boundary** —
+  nothing here defends against a hostile caller (see "MCP/HTTP API
+  design" below for why that's out of scope); its job is to stop a
+  *buggy* client — wrong cached claim ID, stale list, copy-paste error —
+  from silently deleting a claim it never actually made, which plain
+  `agent_id` + `claim_id` wouldn't have caught since `agent_id` is already
+  an unverified, caller-asserted parameter. A token mismatch never deletes
+  anything; it's reported so the caller (or a human reading logs) notices
+  the bug.
 
   **This claim/acknowledge split exists because a network caller (the MCP
   server) can succeed in claiming a message server-side and then lose the
@@ -173,6 +209,8 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   in the message-without-sidecar orphan shape (already one of the four
   states recovery understands), excludes it from the batch returned to
   the caller, reports it distinctly in the result (not silently dropped),
+  counts against that call's `max_messages` bound (see above — this is
+  exactly the failure mode the attempts-not-successes bound exists for),
   and **continues claiming the rest of the eligible messages** rather
   than aborting the whole call — one bad claim doesn't block delivery of
   everything else.
@@ -191,8 +229,19 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   rules as every other shape; recovery should be run while the target
   agent is stopped. The age threshold is a heuristic, not a correctness
   guarantee (cross-machine clock skew) — `claim_ids` is the clock-skew-proof
-  override. `requeue`/`quarantine` fail closed (raise) on a destination
-  filename collision rather than overwriting.
+  override. **A successful `requeue`/`quarantine` also cleans up after
+  itself**: once the message file has been moved, `recover_processing`
+  removes the `.claim.json` sidecar (if present — it contains a
+  `claim_token`, so leaving it behind after the claim it belongs to no
+  longer exists is stale, misleading metadata, not just clutter) and then
+  the now-empty claim directory. If that cleanup step itself fails after
+  the message was already safely moved, that's reported as a partial
+  recovery in the result (the important half — the message is safe —
+  already succeeded), never silently swallowed and never a reason to
+  recursively delete unexpected extra contents in the claim dir (same
+  "never force-delete the unknown" rule as lock release). `requeue`/
+  `quarantine` still fail closed (raise) on a destination filename
+  collision for the message itself, before any of this cleanup happens.
 - **The stored message envelope is versioned, self-describing, and
   bounded**, not just `(sender, type, body)`: every message file's JSON is
   `{schema_version, id, created_at, sender, target_agent_id, type, body}`.
@@ -202,15 +251,35 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   file lives in but cheap to include and useful for a human inspecting a
   requeued/quarantined message in isolation. **`body` must be a JSON
   object** (not a bare scalar or array) — gives every message a stable
-  place to add fields later without a shape migration — **and the
-  serialized envelope has a documented max size (256 KiB in v1)**;
-  `send_message` rejects anything over that limit or with a non-object
-  `body` before writing (`ValueError`, no temp/message file left), so
-  oversized payloads are never a problem `claim_inbox_messages` or an
-  MCP/HTTP response has to deal with downstream. Deliberately **not**
-  included in v1: `reply_to`/`correlation_id` — nothing in scope needs
-  request/response threading between messages yet; add it when a real
-  caller needs it, not speculatively.
+  place to add fields later without a shape migration. **`type` (the
+  message type) is validated too, lightly** — it's protocol surface other
+  agents will eventually dispatch on, not just a free-text field: a
+  non-empty string, capped at a conservative length (64 chars), matching
+  a portable token pattern (lowercase letters/digits plus `.`, `-`, `_` —
+  e.g. `heartbeat`, `task.assigned`); anything else raises `ValueError`
+  before writing. This reuses the *idea* behind `validate_name` (fail
+  loud on malformed protocol input, don't silently coerce) without
+  reusing the function itself — `type` never becomes a path component, so
+  it doesn't need `validate_name`'s path-safety rules, just its own
+  narrower shape check in `coordinator.py`, not `names.py`.
+
+  **The serialized envelope has a documented max size — 256 KiB in v1 —
+  measured precisely, not approximately**: the size checked is
+  `len(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))`,
+  i.e. exactly the bytes `atomic_write_json` is about to write (compact
+  separators, no added whitespace, no trailing newline, `ensure_ascii=False`
+  so non-ASCII content is measured by its actual UTF-8 byte length rather
+  than inflated by `\uXXXX`-escaping). This is the one serialization
+  policy used for every size check in v1 — not a separate rule per
+  caller. `send_message` rejects anything over that limit or with a
+  non-object `body` before writing (`ValueError`, no temp/message file
+  left), so oversized payloads are never a problem `claim_inbox_messages`
+  or an MCP/HTTP response has to deal with downstream. Boundary tests
+  cover exactly-at-the-limit and one-byte-over, plus a non-ASCII payload
+  to confirm the byte count (not the character count) is what's enforced.
+  Deliberately **not** included in v1: `reply_to`/`correlation_id` —
+  nothing in scope needs request/response threading between messages
+  yet; add it when a real caller needs it, not speculatively.
 - **Message ordering is best-effort filename order only** — no
   cross-machine causal or wall-clock guarantee. No per-sender sequence
   numbers in v1, since nothing in scope needs strict ordering yet.
@@ -383,21 +452,31 @@ runbook:
 - **`health_check()`**: a read-only MCP tool (also exposed over the HTTP
   wrapper) returning enough to decide whether recovery is needed without
   SSHing in and inspecting the filesystem by hand — a bare count wasn't
-  enough for that, so the shape is `{status, mesh_root, agents: [{
-  agent_id, lock_names: [...], processing_claims: [{claim_id, shape,
-  age_seconds}]}]}`, per-agent rather than one global count, including
-  each processing claim's identifiable shape (empty / no-sidecar /
-  malformed-sidecar / complete — the same four shapes `recover_processing`
-  already understands) and age. **Never includes message bodies, claim
-  tokens, or lock owner tokens** — enough to decide *whether* and *what*
-  to recover, not a substitute for `recover_processing`'s own dry-run
-  report, which stays the source of truth for the actual recovery
-  decision. This is visibility, not automatic remediation — the fix is
-  still the explicit `recover_processing` call below, deliberately. (An
-  earlier draft considered adding separate `list_processing_claims`/
-  `list_locks` tools instead; enriching `health_check()`'s own output was
-  chosen as the smaller addition — revisit only if a real caller needs
-  something `health_check()` doesn't already surface.)
+  enough for that. **Locks are reported as their own top-level field, not
+  nested under agents**: `locks/` is a global directory with no owning
+  agent recorded anywhere (a lock's `owner.token` proves nothing about
+  *which agent* acquired it, only that a specific acquire call did), so
+  nesting `lock_names` under `agents` would have meant either inventing
+  ownership data the design doesn't track or duplicating every lock name
+  under every agent — both wrong. The corrected shape is
+  `{status, mesh_root, agents: [{agent_id, processing_claims: [{claim_id,
+  shape, age_seconds}]}], locks: [{lock_name, shape, age_seconds}]}`.
+  Processing-claim `shape` is one of the four `recover_processing` already
+  understands (empty / no-sidecar / malformed-sidecar / complete); lock
+  `shape` is one of two — `token-present` (normal, possibly still held) or
+  `token-missing` (the accepted hard-crash-between-`mkdir`-and-token-write
+  limitation, needing manual cleanup) — reflecting that locks don't have
+  the same four-shape lifecycle claims do. **Never includes message
+  bodies, claim tokens, or lock owner tokens** — enough to decide
+  *whether* and *what* to recover, not a substitute for
+  `recover_processing`'s own dry-run report, which stays the source of
+  truth for the actual recovery decision. This is visibility, not
+  automatic remediation — the fix is still the explicit
+  `recover_processing` call below, deliberately. (An earlier draft
+  considered adding separate `list_processing_claims`/`list_locks` tools
+  instead; enriching `health_check()`'s own output was chosen as the
+  smaller addition — revisit only if a real caller needs something
+  `health_check()` doesn't already surface.)
 - **Admin CLI for `recover_processing`**: `recover_processing` is
   operator-only and deliberately not an MCP tool, but "run a Python
   function directly on the Mac mini" isn't a real entrypoint for the
@@ -482,23 +561,34 @@ wrapper, for Ollama tooling) that fronts it.
 - `send_message` payload shape (`schema_version`, `id`, `created_at`,
   `sender`, `target_agent_id`, `type`, `body`), missing-inbox error,
   target-is-not-a-directory error, message-id uniqueness under identical
-  timestamps, rejecting a non-object `body` or an envelope over the
-  documented size limit before writing anything
-- Inbox claim/acknowledge — `claim_inbox_messages` does the atomic claim
-  via `mkdir` (with bounded retry on claim-ID collision) + rename into
-  `.processing/<claim_id>/` + an atomically-written sidecar (including a
-  `claim_token`), returning claimed messages and their tokens without
-  deleting them, bounded by `max_messages`, and continuing past a single
-  claim's sidecar-write failure rather than aborting the whole batch;
-  `acknowledge_claims` deletes a given set of `(claim_id, claim_token)`
-  pairs and reports — per item — acknowledged / not-found / token-mismatch,
-  never silently ignoring or force-deleting on a mismatch; `scan_and_clear_inbox`
-  is a thin wrapper composing the two; malformed JSON quarantined (not
-  left in place), tolerating concurrent-claim races and all four orphan
-  shapes, documented best-effort-only ordering, ignored files reported
-  not dropped
+  timestamps, rejecting a non-object `body`, an invalid `type`, or an
+  envelope over the documented size limit (measured against the exact
+  serialization bytes) before writing anything
+- Inbox claim/acknowledge — `claim_inbox_messages` validates `max_messages`
+  (integer, `1..MAX_CLAIM_BATCH_SIZE`) before touching the inbox; does the
+  atomic claim via `mkdir` (with bounded retry on claim-ID collision) +
+  rename into `.processing/<claim_id>/` + an atomically-written sidecar
+  (including a `claim_token`), returning claimed messages and their
+  tokens without deleting them; `max_messages` bounds *attempted* claims
+  (successful or orphaned), not just successful returns, so repeated
+  sidecar-write failures can't move an unbounded number of messages out
+  of the inbox in one call; continues past a single claim's sidecar-write
+  failure rather than aborting the whole batch; `acknowledge_claims`
+  validates each `claim_id` (via `validate_claim_id`) and `claim_token`
+  (non-empty string) before touching anything, deletes a given set of
+  `(claim_id, claim_token)` pairs, and reports — per item — acknowledged /
+  not-found / token-mismatch / unacknowledgeable (an orphan shape with no
+  valid token to check), never silently ignoring or force-deleting on a
+  mismatch or an unacknowledgeable claim; `scan_and_clear_inbox` is a thin
+  wrapper composing the two; malformed JSON quarantined (not left in
+  place), tolerating concurrent-claim races and all four orphan shapes,
+  documented best-effort-only ordering, ignored files reported not
+  dropped
 - `recover_processing` — validates any caller-supplied `claim_ids` via
-  `validate_claim_id` before touching the filesystem; reports/requeues/
+  `validate_claim_id` before touching the filesystem; cleans up the
+  sidecar and now-empty claim dir after a successful requeue/quarantine
+  move, reporting (not raising past) a failure in that cleanup step;
+  reports/requeues/
   quarantines claims (uniformly across all orphan shapes, including empty
   claim dirs) by age threshold (heuristic only) or by explicit `claim_ids`
   override, failing closed on a requeue/quarantine destination collision;
@@ -546,14 +636,14 @@ wrapper, for Ollama tooling) that fronts it.
 3. `test_coordinator_locks.py` — `acquire_lock` returns a `LockHandle` (truthy, carries `lock_name` + an opaque token) on success and `None` on timeout; on successful `mkdir`, an `owner.token` file is written inside the lock dir before the handle is returned; if that token write raises, `acquire_lock` removes the lock dir it just created and treats the attempt as failed (retries within the remaining timeout, or returns `None`) — test via a monkeypatched write that raises on the first attempt only; `release_lock(handle)` reads `owner.token`, and: missing file → no-op; mismatched token (simulate by manually swapping the on-disk token between acquire and release) → no-op, lock dir untouched; matching token → `os.remove(owner.token)` then `os.rmdir(lock_dir)`; a matching token that disappears between the read and the remove (simulated race) is treated as already-released, not an error; an unexpected extra file left in the lock dir alongside a valid matching token causes `rmdir` to fail on a non-empty directory, and this **raises** rather than deleting the extra file or silently leaving an undeletable lock dir; releasing an already-released handle a second time is a no-op; timeout returns `None` with no real sleep; retry-then-succeed via mocked `FileExistsError` once; two-coordinator contention; thread-pool exactly-one-winner race (exactly one thread gets a non-`None` handle); `lock_name` validated via `validate_name` before any `mkdir` attempt.
 4. `test_coordinator_atomic_write.py` — writes target content; creates missing parent dirs; rejects a `target_file_path` that resolves outside `mesh_root` (absolute path elsewhere, `..` traversal) with `ValueError`, before any file is touched; rejects a path with any symlink component between `mesh_root` and the target — including a symlink that would still resolve back inside `mesh_root`; temp file uses a collision-resistant name (`tempfile.mkstemp`, not PID-based) so two concurrent writers to the same target never share a temp path; full write sequence is `mkstemp` → write → `flush()` → `os.fsync(fd)` → `close()` → `os.replace()` → best-effort parent-directory fsync that swallows `OSError` (test spies on both fsync calls, and separately confirms a parent-dir-fsync `OSError` doesn't propagate or affect the completed write); descriptor is closed even when a later step fails; cleans up temp file and raises `IOError` on `os.replace` failure; leaves existing target untouched if the temp-file write itself fails; passing a non-JSON-serializable payload (e.g. a `set()`) raises, leaves no temp file, and leaves any existing target untouched.
 5. `test_coordinator_state.py` — payload shape (`agent_id`, `timestamp`, `status`, `active_tasks`, `metadata`); `None` metadata defaults to `{}`; provided metadata passed through; delegates to `atomic_write_json` (isolated via spy); a non-serializable value in `extra_metadata` propagates the same clean failure as `atomic_write_json`'s own test (no target/temp file left).
-6. `test_coordinator_send_message.py` — raises `FileNotFoundError` for missing target inbox; raises `NotADirectoryError` when `agents/<target_id>/inbox` exists but is a file, not a directory; a symlink at that path is treated as unsupported and fails closed (raises, not resolved/followed); `target_agent_id` validated via `validate_name`; stored envelope shape is `{schema_version, id, created_at, sender, target_agent_id, type, body}`; unique `id`/filename even when the clock returns identical timestamps twice (drives a monotonic counter or `uuid4` suffix); non-serializable `payload` fails cleanly (no message file left in the target inbox); a non-`dict` `body` (e.g. a bare string or list) raises `ValueError` before writing; a `body` whose serialized envelope exceeds the documented size limit (256 KiB) raises `ValueError` before writing, with a boundary test at exactly the limit and one byte over it.
+6. `test_coordinator_send_message.py` — raises `FileNotFoundError` for missing target inbox; raises `NotADirectoryError` when `agents/<target_id>/inbox` exists but is a file, not a directory; a symlink at that path is treated as unsupported and fails closed (raises, not resolved/followed); `target_agent_id` validated via `validate_name`; stored envelope shape is `{schema_version, id, created_at, sender, target_agent_id, type, body}`; unique `id`/filename even when the clock returns identical timestamps twice (drives a monotonic counter or `uuid4` suffix); non-serializable `payload` fails cleanly (no message file left in the target inbox); a non-`dict` `body` (e.g. a bare string or list) raises `ValueError` before writing; `message_type` validated (non-empty, ≤64 chars, `[a-z0-9._-]+` pattern) before writing, rejecting empty string, uppercase, and a separator/space-containing value; a `body` whose serialized envelope exceeds the documented size limit (256 KiB, measured as `len(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))`) raises `ValueError` before writing, with a boundary test at exactly the limit, one byte over it, and a non-ASCII payload confirming UTF-8 byte length (not character count) is what's enforced.
 
 ### `inbox.py`
 7. `test_inbox_scan.py` — split into claim and acknowledge, tested separately, plus a thin composition test:
-   - **`claim_inbox_messages`**: empty inbox; claims a message via `mkdir(.processing/<claim_id>/)` (not the exclusivity point; on `FileExistsError` from a claim-ID collision, retries with a new ID up to a bounded count — test this by forcing `FileExistsError` on the first generated ID) then `os.rename` of the original message into that dir as `<claim_id>/<original_filename>` (**this rename is the exclusivity point** — two concurrent claims racing the same source message: exactly one rename succeeds, the other gets `FileNotFoundError` and moves on, its now-empty claim dir removed), then writes `<claim_id>/<original_filename>.claim.json` (`claimant_agent_id`, `claimed_at`, `claim_token`) via `atomic_write_json` (not a bespoke write — spy-assert it's the same call path coordinator writes use); **returns the claimed messages, their claim IDs, and their tokens without deleting anything**; `max_messages` bounds how many are claimed in one call (test with an inbox larger than the limit, confirming exactly `max_messages` are claimed and the rest remain untouched in the inbox); if the sidecar write raises for one message *after* its rename (monkeypatched failure), that message is excluded from the returned batch, reported distinctly in the result, left in place as a message-without-sidecar orphan (not rolled back), and claiming continues for the remaining eligible messages in the same call; sorted-by-filename processing order (not mtime) — asserted only as "best-effort filename order, no cross-machine causal guarantee"; ignores stray `.tmp_*`/hidden files and anything already in `.processing/`, and reports each ignored filename in `InboxScanResult.ignored` rather than dropping it silently; malformed JSON is quarantined — renamed into `inbox/.invalid/` rather than left in place, reported in `InboxScanResult.skipped`; tolerates `Path.unlink`/rename raising `FileNotFoundError` from a concurrent claim.
-   - **`acknowledge_claims(agent_id, claims)`** where `claims` is a list of `{claim_id, claim_token}`: each `claim_id` is validated via `validate_claim_id` before touching any path; deletes the message + sidecar + claim dir only when the given token matches the one in `.claim.json`; per-item result is one of acknowledged / not-found (claim ID doesn't exist) / token-mismatch (claim ID exists, token doesn't match — claim left untouched, not deleted); acknowledging a subset of a batch leaves the rest claimed and untouched (repeatable partial ack); calling it twice on the same claim ID+token is safe (second call reports not-found, doesn't raise); a token-mismatch case is tested explicitly (manually swap the on-disk token, same pattern as the lock-token mismatch test) and asserts the claim survives untouched.
+   - **`claim_inbox_messages`**: empty inbox; claims a message via `mkdir(.processing/<claim_id>/)` (not the exclusivity point; on `FileExistsError` from a claim-ID collision, retries with a new ID up to a bounded count — test this by forcing `FileExistsError` on the first generated ID) then `os.rename` of the original message into that dir as `<claim_id>/<original_filename>` (**this rename is the exclusivity point** — two concurrent claims racing the same source message: exactly one rename succeeds, the other gets `FileNotFoundError` and moves on, its now-empty claim dir removed), then writes `<claim_id>/<original_filename>.claim.json` (`claimant_agent_id`, `claimed_at`, a `claim_token` generated via `secrets.token_hex(16)`) via `atomic_write_json` (not a bespoke write — spy-assert it's the same call path coordinator writes use); **returns the claimed messages, their claim IDs, and their tokens without deleting anything**; `max_messages` rejects `0`, negative, non-integer, and over-`MAX_CLAIM_BATCH_SIZE` (50) values with `ValueError` before touching the inbox; with a valid `max_messages`, an inbox larger than the limit leaves exactly `max_messages` claimed and the rest untouched; if the sidecar write raises for one message *after* its rename (monkeypatched failure), that message is excluded from the returned batch, reported distinctly in the result, left in place as a message-without-sidecar orphan (not rolled back), **counts toward `max_messages` for that call** (test: force sidecar-write failure on every attempt and confirm the call claims/orphans exactly `max_messages` source messages total, not more, while returning zero successes), and claiming continues for the remaining eligible messages in the same call; sorted-by-filename processing order (not mtime) — asserted only as "best-effort filename order, no cross-machine causal guarantee"; ignores stray `.tmp_*`/hidden files and anything already in `.processing/`, and reports each ignored filename in `InboxScanResult.ignored` rather than dropping it silently; malformed JSON is quarantined — renamed into `inbox/.invalid/` rather than left in place, reported in `InboxScanResult.skipped`; tolerates `Path.unlink`/rename raising `FileNotFoundError` from a concurrent claim.
+   - **`acknowledge_claims(agent_id, claims)`** where `claims` is a list of `{claim_id, claim_token}`: each `claim_id` is validated via `validate_claim_id` before touching any path; each `claim_token` must be a non-empty string or the call raises `ValueError` before reading/deleting anything (missing, empty, and non-string token are each tested); deletes the message + sidecar + claim dir only when the given token matches the one in `.claim.json`; per-item result is one of: `acknowledged`; `not-found` (claim ID doesn't exist at all); `token-mismatch` (a *complete* claim exists but the token doesn't match — claim left untouched); or `unacknowledgeable` (the claim dir exists but is one of the three orphan shapes with no valid token to compare against — empty dir, no-sidecar, or malformed-sidecar — reported with which shape, claim left completely untouched); acknowledging a subset of a batch leaves the rest claimed and untouched (repeatable partial ack); calling it twice on the same claim ID+token is safe (second call reports not-found, doesn't raise); a token-mismatch case is tested explicitly against a complete claim (manually swap the on-disk token, same pattern as the lock-token mismatch test); each of the three orphan shapes is tested explicitly against `acknowledge_claims` (not just against `recover_processing`) to confirm it's reported as `unacknowledgeable`, not misreported as `not-found` or `token-mismatch`, and that nothing is deleted.
    - **`scan_and_clear_inbox`**: thin composition test only — asserts it calls `claim_inbox_messages` then `acknowledge_claims` with exactly the claim IDs and tokens it got back (spy-isolated), not a re-test of either's internals.
-8. `test_inbox_recovery.py` — `recover_processing(mesh_root, agent_id, older_than_seconds=None, claim_ids=None, action=None)` validates every entry in a caller-supplied `claim_ids` via `validate_claim_id` before touching the filesystem, raising `ValueError` on the first invalid one and touching nothing; is a no-op when called with no stale/matching claims; four orphan shapes handled explicitly, **all age-checked via the same selection rules** (no shape is ever unconditionally acted on): (a) an empty `.processing/<claim_id>/` (crash right after `mkdir`, before rename, **or** a live scanner's normal transient state between its own `mkdir` and rename) is age-checked via the claim directory's own mtime — critically, this means a fresh empty claim dir from an active scanner is left alone by default, only an old one is eligible; (b) a claim dir with the message file but no `.claim.json` sidecar is age-checked via the message file's mtime; (c) a claim dir whose sidecar exists but fails to parse (invalid JSON, missing `claimed_at`, or an invalid claimant) is treated like (b) — age-checked via message mtime, with the parse failure reported clearly in the result, not raised; (d) a normal claim (message + valid sidecar) is age-checked via the sidecar's `claimed_at`. Age-based selection (`older_than_seconds`) is documented and tested as a heuristic only; passing explicit `claim_ids` instead recovers exactly those claims regardless of age. `action=None` is dry-run/report-only; `action="requeue"` moves the message back to the inbox root **and raises if a file already exists at that destination** rather than overwriting it; `action="quarantine"` moves it to `.invalid/` with the same fail-closed-on-collision rule; a claim not selected (too young, or not in `claim_ids`) is left untouched under any action; never called by `scan_and_clear_inbox` itself — this is exclusively an explicit, operator-invoked utility, and the docs should say plainly that it's meant to be run while the target agent's own process is stopped, precisely because empty claim dirs are otherwise ambiguous with a live scanner's in-flight state.
+8. `test_inbox_recovery.py` — `recover_processing(mesh_root, agent_id, older_than_seconds=None, claim_ids=None, action=None)` validates every entry in a caller-supplied `claim_ids` via `validate_claim_id` before touching the filesystem, raising `ValueError` on the first invalid one and touching nothing; is a no-op when called with no stale/matching claims; four orphan shapes handled explicitly, **all age-checked via the same selection rules** (no shape is ever unconditionally acted on): (a) an empty `.processing/<claim_id>/` (crash right after `mkdir`, before rename, **or** a live scanner's normal transient state between its own `mkdir` and rename) is age-checked via the claim directory's own mtime — critically, this means a fresh empty claim dir from an active scanner is left alone by default, only an old one is eligible; (b) a claim dir with the message file but no `.claim.json` sidecar is age-checked via the message file's mtime; (c) a claim dir whose sidecar exists but fails to parse (invalid JSON, missing `claimed_at`, or an invalid claimant) is treated like (b) — age-checked via message mtime, with the parse failure reported clearly in the result, not raised; (d) a normal claim (message + valid sidecar) is age-checked via the sidecar's `claimed_at`. Age-based selection (`older_than_seconds`) is documented and tested as a heuristic only; passing explicit `claim_ids` instead recovers exactly those claims regardless of age. `action=None` is dry-run/report-only; `action="requeue"` moves the message back to the inbox root **and raises if a file already exists at that destination** rather than overwriting it; `action="quarantine"` moves it to `.invalid/` with the same fail-closed-on-collision rule; **after a successful move, the sidecar (if present) and the now-empty claim dir are also removed** — tested for a complete claim (sidecar present, contains a `claim_token`) and for the no-sidecar orphan shape (nothing to remove but the dir); if that cleanup step raises after the message was already moved (monkeypatched failure), the result reports a partial recovery rather than raising past a message that's already safely relocated, and no unexpected extra file in the claim dir is ever force-deleted; a claim not selected (too young, or not in `claim_ids`) is left untouched under any action; never called by `scan_and_clear_inbox` itself — this is exclusively an explicit, operator-invoked utility, and the docs should say plainly that it's meant to be run while the target agent's own process is stopped, precisely because empty claim dirs are otherwise ambiguous with a live scanner's in-flight state.
 8b. `test_inbox_recover_cli.py` — `recover_main(argv)` maps `--mesh-root`, `--agent-id`, `--older-than-seconds`, repeated `--claim-id` (collected into a list), `--action` (`report`/`requeue`/`quarantine`, mapped to `None`/`"requeue"`/`"quarantine"`), and `--dry-run` onto a call into `recover_processing` (spy-isolated — this is an argument-mapping test, not a re-test of recovery logic); `--dry-run` forces `action=None` even if `--action` was also given; missing required `--mesh-root`/`--agent-id` exits non-zero with a clear usage error rather than raising a raw traceback.
 
 ### `rules_template.py`
@@ -566,13 +656,18 @@ wrapper, for Ollama tooling) that fronts it.
 11. `test_bootstrap_integration.py` — one end-to-end run of `bootstrap_mesh` against `tmp_path` asserting the full real directory tree + a valid `local_rules.json`, for the three default agent ids (`agent_mac_mini`, `agent_mbp`, `agent_ollama_local`). No code-deployment shim exists or is tested — the live share is data-only.
 
 ### `mcp_server.py` (follow-up build, design already fixed above)
-12. Not yet TDD-cycled, but no longer an open design question: the tool
-    list, request/response shapes, identity model, lock-handle
+12. Not yet TDD-cycled, but no longer an open design question on *behavior*:
+    the tool list, request/response shapes, identity model, lock-handle
     serialization, and inbox ack semantics are all fixed in "MCP/HTTP API
-    design" above. What's still deferred is purely mechanical: choosing an
-    MCP server library/SDK, wiring its tool-registration API to the
-    functions named above, and mapping raised exceptions to that
-    framework's error shape. Cycle this once that library choice is made —
+    design" above. What's deferred is choosing an MCP server library/SDK,
+    passing it through that section's framework-selection gate (binding
+    mode, timeout/cancellation, error serialization, partial-result
+    support, Claude Code/Codex compatibility), then wiring its
+    tool-registration API to the functions named above and mapping raised
+    exceptions to that framework's error shape — real work with its own
+    behavioral consequences, not a fungible detail, which is exactly why
+    that gate exists rather than skipping straight to cycling tests here.
+    Cycle this once that library choice is made and has passed the gate —
     each tool becomes a thin test asserting it calls the right coordinator/
     inbox/rules_template function with the right arguments and maps its
     exceptions correctly (spy-isolated, the same pattern already used for
