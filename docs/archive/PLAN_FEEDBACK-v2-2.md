@@ -1,5 +1,7 @@
 # Adversarial Review Feedback for Updated `IMPLEMENTATION_PLAN_v2.md`
 
+> **Archived (2026-07-23) — historical record.** Findings 1–6, 8, 9, and 10 were accepted and folded into `../IMPLEMENTATION_PLAN_v2.md` (`validate_claim_id`, `claim_token` on `.claim.json`/`acknowledge_claims`, `max_messages` + a 256 KiB envelope size/object-shape limit on `send_message`, an explicit sidecar-write-failure spec, the `agent-mesh-recover-processing` admin CLI, a per-agent `health_check()` shape) and into `../../AGENTS.md` (updated "Key invariants" to match, plus a stated convention for archiving future root-level review files). Finding 7 (framework "purely mechanical") was accepted as a wording correction, replaced with an explicit MCP-framework-selection gate. No findings were pushed back on outright this round — see the finding-by-finding notes in the commit that addressed this file for where "enrich `health_check()`" was chosen over the alternative "add separate `list_*` tools," a judgment call rather than a disagreement. Kept for the reasoning trail, not as living guidance.
+
 Review date: 2026-07-23
 
 This is a second adversarial pass after the first `v2-FEEDBACK.md` findings were largely folded into `docs/IMPLEMENTATION_PLAN_v2.md`, `docs/PROBLEM_STATEMENT.md`, and `AGENTS.md`.
