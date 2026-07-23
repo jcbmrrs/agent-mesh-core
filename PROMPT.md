@@ -34,3 +34,7 @@ Please execute the following steps sequentially directly on this system:
 
 Verify your creations by checking directory structures and mocking an atomic write test script to ensure operations run without warnings.
 
+## Amendment (per PROJECT-SETUP.md)
+
+Steps 3 and 4 above, read literally, have an agent write `agent_core.py` and `config/local_rules.json` directly into the live `/Users/Shared/AgentMesh` share. That's superseded: source code and templates are developed and version-controlled in this git repo (see `IMPLEMENTATION_PLAN.md` for the `src/agent_mesh_core/` package layout), and a `deploy.sh` script pushes them out to the live share. The live share itself is never a git-tracked directory — see `.gitignore` and `AGENTS.md`'s "Repo vs. live share split" section for why. Step 4's "don't overwrite existing config" caveat is implemented once, in Python (`rules_template.write_local_rules_template`'s `force` flag), and reused by both the deploy path and any bootstrap tooling — not reimplemented as a bash existence check.
+

@@ -4,7 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-This directory is currently **design/planning stage only** — it contains no source code, build tooling, or tests yet. The three files here (`BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`) define the architecture for a multi-agent coordination mesh that has not been implemented on disk yet. There is no `agent_core.py`, no `config/`, `agents/`, or `locks/` directory, and no test suite to run. When asked to "implement" or "set this up," treat `PROMPT.md` as the task spec and `MULTI-AGENT-GUIDE.md` as the design doc it's derived from.
+This directory is currently **design/planning stage only** — it contains no source code, build tooling, or tests yet. The files here (`BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`, `PROJECT-SETUP.md`) define the architecture for a multi-agent coordination mesh that has not been implemented on disk yet. There is no `agent_core.py`, no `config/`, `agents/`, or `locks/` directory, and no test suite to run. When asked to "implement" or "set this up," treat `PROMPT.md` as the task spec (as amended by `PROJECT-SETUP.md`), `MULTI-AGENT-GUIDE.md` as the design doc it's derived from, and `IMPLEMENTATION_PLAN.md` as the concrete build plan.
+
+## Repo vs. live share split (per PROJECT-SETUP.md)
+
+Two distinct zones, never conflated:
+
+- **This git repo** — source of truth for logic: the `src/agent_mesh_core/` package (see `IMPLEMENTATION_PLAN.md`), templates (`config/*.template.json`), `deploy.sh`, and the design docs. Fully version-controlled; a bad change to lock mechanics is one `git revert` away.
+- **`/Users/Shared/AgentMesh`** — the live data share. Populated *from* this repo via `deploy.sh`, never edited directly and never git-tracked (see `.gitignore`). It holds runtime state only: `agents/*/inbox/`, `agents/*/state.json`, `locks/`, and the deployed `config/local_rules.json`.
+
+Why the split: it keeps Claude Code/Codex context windows clean (no wading through megabytes of agent heartbeats or old inbox messages), makes logic bugs revertible without destroying live agent state, and lets a new machine (the Linux box, the Windows rig) get productive with a `git clone` + mount + `deploy.sh` run.
+
+`deploy.sh` should not reimplement Python logic in bash — e.g. the "don't clobber an existing `local_rules.json`" check belongs in `rules_template.write_local_rules_template`'s `force` flag (already unit-tested), not as a bash `[ -f ... ]` guard. `deploy.sh`'s job is limited to: sync the repo's `src/` to the target machine (or rely on it already being there via `git pull`), then invoke the packaged bootstrap entrypoint.
 
 ## What this system is for
 
@@ -62,5 +73,6 @@ Any script that provisions the SMB share itself (vs. just consuming it) should p
 ## Keep in sync
 
 - `MULTI-AGENT-GUIDE.md` (directory structure + `agent_core.py` boilerplate) ↔ this file's "Planned architecture" and "Coordinator API shape" sections — if the boilerplate class/method signatures change, update the summary here too.
-- `PROMPT.md` (task spec) ↔ `IMPLEMENTATION_PLAN.md` — if the scope in PROMPT.md changes (e.g. dropping the SMB provisioning step), the Logic Gate triage and TDD cycle list in the plan need to change with it.
+- `PROMPT.md` (task spec, as amended) ↔ `IMPLEMENTATION_PLAN.md` — if the scope in PROMPT.md changes (e.g. dropping the SMB provisioning step), the Logic Gate triage and TDD cycle list in the plan need to change with it.
 - `BACKGROUND.md` (Q&A on hosts/agents/OSes) ↔ this file's "Network/transport notes" — if the set of client machines/OSes changes, update both the Q&A answers and the transport notes.
+- `PROJECT-SETUP.md` (`deploy.sh`, `.gitignore` recommendations) ↔ this repo's actual `.gitignore` and `IMPLEMENTATION_PLAN.md`'s "Deployment" section — if the deploy mechanism or ignored-path list changes in one, update the other.
