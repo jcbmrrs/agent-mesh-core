@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "network_context": {
+    "transport": "mcp_server_over_tailscale",
+    "mesh_root_writer": "mac_mini_only"
+  },
+  "model_overrides": {},
+  "file_tree_exclusions": [".git", "__pycache__", ".venv", "node_modules"]
+}
