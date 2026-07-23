@@ -1,3 +1,18 @@
+# Archived TDD Feedback Resolution
+
+This review targeted commit `1faa3f5` and has been addressed in the
+follow-up TDD hardening pass. Accepted findings: per-item partial ack
+cleanup, selected empty-claim cleanup, removal of the undocumented
+`claimant_agent_id` API parameter, corrected bootstrap duplicate/empty-list
+tests, inbox claim-ID collision and real-concurrency tests, exact
+message-size boundary tests, direct `time` import, public
+`claim_age_seconds` helper, explicit empty-agent bootstrap behavior,
+explicit `None` defaults in `update_state`, stronger symlink no-write and
+health redaction tests, and `acknowledge_claims` claim-item validation.
+Pushback: none of the findings were rejected; the `claimant_agent_id`
+point was resolved by deleting the parameter rather than expanding the
+identity model.
+
 # Adversarial Review of the AgentMesh Core TDD Build
 
 Review date: 2026-07-23. Scope: `src/agent_mesh_core/` and `tests/` as of

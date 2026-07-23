@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from agent_mesh_core.coordinator import AgentMeshCoordinator
+from agent_mesh_core.coordinator import AgentMeshCoordinator, MeshJsonWriter
 from agent_mesh_core.names import validate_name
 from agent_mesh_core.rules_template import write_local_rules_template
 
@@ -17,12 +17,13 @@ def bootstrap_mesh(
     force_rules: bool = False,
 ) -> None:
     mesh_root = Path(mesh_root)
-    agent_ids = agent_ids or DEFAULT_AGENT_IDS
+    if agent_ids is None:
+        agent_ids = DEFAULT_AGENT_IDS
     validated = [validate_name(agent_id) for agent_id in agent_ids]
     if len(set(agent_id.casefold() for agent_id in validated)) != len(validated):
         raise ValueError("duplicate agent IDs after lowercase normalization")
     coordinators = [AgentMeshCoordinator(mesh_root, agent_id) for agent_id in validated]
-    writer = coordinators[0] if coordinators else AgentMeshCoordinator(mesh_root, "agent_mac_mini")
+    writer = coordinators[0] if coordinators else MeshJsonWriter(mesh_root)
     write_local_rules_template(
         mesh_root, overrides=rules_overrides, force=force_rules, coordinator=writer
     )

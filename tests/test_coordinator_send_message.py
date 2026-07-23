@@ -1,10 +1,13 @@
 import json
+import uuid
 
 import pytest
 
 from agent_mesh_core import AgentMeshCoordinator
 from agent_mesh_core.coordinator import MAX_MESSAGE_BYTES
 from conftest import FakeClock
+
+FIXED_MESSAGE_ID = uuid.UUID("12345678-1234-5678-1234-567812345678")
 
 
 def test_send_message_requires_existing_real_target_inbox(mesh_root):
@@ -82,6 +85,47 @@ def test_send_message_rejects_oversized_envelope_before_writing(mesh_root):
 
     with pytest.raises(ValueError):
         sender.send_message("agent_b", "task.assigned", {"x": "é" * MAX_MESSAGE_BYTES})
+
+    assert list((mesh_root / "agents" / "agent_b" / "inbox").glob("*.json")) == []
+
+
+def _payload_for_exact_message_size(sender, target_agent_id, message_type):
+    envelope = {
+        "schema_version": 1,
+        "id": FIXED_MESSAGE_ID.hex,
+        "created_at": sender.clock.time(),
+        "sender": sender.agent_id,
+        "target_agent_id": target_agent_id,
+        "type": message_type,
+        "body": {"x": ""},
+    }
+    empty_size = len(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode())
+    return {"x": "x" * (MAX_MESSAGE_BYTES - empty_size)}
+
+
+def test_send_message_accepts_exact_size_limit(monkeypatch, mesh_root):
+    clock = FakeClock()
+    sender = AgentMeshCoordinator(mesh_root, "agent_a", clock=clock)
+    AgentMeshCoordinator(mesh_root, "agent_b", clock=clock)
+    monkeypatch.setattr("agent_mesh_core.coordinator.uuid.uuid4", lambda: FIXED_MESSAGE_ID)
+    payload = _payload_for_exact_message_size(sender, "agent_b", "task.assigned")
+
+    sender.send_message("agent_b", "task.assigned", payload)
+
+    message_file = mesh_root / "agents" / "agent_b" / "inbox" / f"{FIXED_MESSAGE_ID.hex}.json"
+    assert len(message_file.read_bytes()) == MAX_MESSAGE_BYTES
+
+
+def test_send_message_rejects_one_byte_over_size_limit(monkeypatch, mesh_root):
+    clock = FakeClock()
+    sender = AgentMeshCoordinator(mesh_root, "agent_a", clock=clock)
+    AgentMeshCoordinator(mesh_root, "agent_b", clock=clock)
+    monkeypatch.setattr("agent_mesh_core.coordinator.uuid.uuid4", lambda: FIXED_MESSAGE_ID)
+    payload = _payload_for_exact_message_size(sender, "agent_b", "task.assigned")
+    payload["x"] += "x"
+
+    with pytest.raises(ValueError):
+        sender.send_message("agent_b", "task.assigned", payload)
 
     assert list((mesh_root / "agents" / "agent_b" / "inbox").glob("*.json")) == []
 

@@ -12,6 +12,7 @@ def test_health_check_reports_agents_processing_claims_and_locks(mesh_root):
     tokenless.mkdir()
 
     health = coordinator.health_check()
+    serialized_health = str(health)
 
     assert health["status"] == "ok"
     assert health["mesh_root"] == str(mesh_root)
@@ -20,5 +21,9 @@ def test_health_check_reports_agents_processing_claims_and_locks(mesh_root):
     assert agent_a["processing_claims"][0]["shape"] == "complete"
     locks = {item["lock_name"]: item["shape"] for item in health["locks"]}
     assert locks == {"shared": "token-present", "tokenless": "token-missing"}
+    assert claim.claim_token not in serialized_health
+    assert lock.token not in serialized_health
+    assert "body" not in serialized_health
+    assert "owner.token" not in serialized_health
 
     coordinator.release_lock(lock)

@@ -47,7 +47,7 @@ def test_recover_processing_quarantines_no_sidecar_claim(mesh_root):
     assert not claim_dir.exists()
 
 
-def test_recover_processing_empty_claim_is_reported_not_deleted(mesh_root):
+def test_recover_processing_selected_empty_claim_is_removed(mesh_root):
     AgentMeshCoordinator(mesh_root, "agent_a")
     claim_id = "2" * 32
     claim_dir = mesh_root / "agents" / "agent_a" / "inbox" / ".processing" / claim_id
@@ -55,8 +55,8 @@ def test_recover_processing_empty_claim_is_reported_not_deleted(mesh_root):
 
     result = recover_processing(mesh_root, "agent_a", claim_ids=[claim_id], action="requeue")
 
-    assert result[0]["status"] == "empty"
-    assert claim_dir.exists()
+    assert result[0]["status"] == "recovered"
+    assert not claim_dir.exists()
 
 
 def test_recover_processing_age_selects_old_claims_only(mesh_root):

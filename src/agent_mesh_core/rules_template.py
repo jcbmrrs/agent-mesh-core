@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from agent_mesh_core.coordinator import AgentMeshCoordinator
+from agent_mesh_core.coordinator import AgentMeshCoordinator, MeshJsonWriter
 
 DEFAULT_LOCAL_RULES: dict[str, Any] = {
     "schema_version": 1,
@@ -51,7 +51,7 @@ def write_local_rules_template(
     target = mesh_root / "config" / "local_rules.json"
     if target.exists() and not force:
         raise FileExistsError(f"refusing to overwrite existing local rules: {target}")
-    writer = coordinator or AgentMeshCoordinator(mesh_root, "agent_mac_mini")
+    writer = coordinator or MeshJsonWriter(mesh_root)
     rules = build_local_rules(overrides)
     writer.atomic_write_json(target, rules)
     return rules

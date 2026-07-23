@@ -13,9 +13,16 @@ def test_bootstrap_mesh_creates_dirs_and_rules(mesh_root):
     assert (mesh_root / "config" / "local_rules.json").is_file()
 
 
-def test_bootstrap_rejects_duplicate_after_normalization_before_creating_anything(mesh_root):
+def test_bootstrap_rejects_invalid_agent_id_before_creating_anything(mesh_root):
     with pytest.raises(ValueError):
         bootstrap_mesh(mesh_root, ["agent_mbp", "Agent_MBP"])
+
+    assert not mesh_root.exists()
+
+
+def test_bootstrap_rejects_duplicate_agent_ids_before_creating_anything(mesh_root):
+    with pytest.raises(ValueError):
+        bootstrap_mesh(mesh_root, ["agent_mbp", "agent_mbp"])
 
     assert not mesh_root.exists()
 
@@ -36,6 +43,13 @@ def test_bootstrap_force_rules_overwrites(mesh_root):
         rules_overrides={"network_context": {"transport": "forced"}},
         force_rules=True,
     )
+
+
+def test_bootstrap_accepts_explicit_empty_agent_list(mesh_root):
+    bootstrap_mesh(mesh_root, [])
+
+    assert not (mesh_root / "agents").exists()
+    assert (mesh_root / "config" / "local_rules.json").is_file()
 
 
 def test_bootstrap_call_order_dirs_before_rules(monkeypatch, mesh_root):

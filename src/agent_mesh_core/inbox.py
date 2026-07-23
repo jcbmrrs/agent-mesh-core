@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import secrets
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,20 +56,18 @@ def _validate_max_messages(max_messages: int) -> None:
 def claim_inbox_messages(
     mesh_root: str | Path,
     agent_id: str,
-    claimant_agent_id: str | None = None,
     max_messages: int = MAX_CLAIM_BATCH_SIZE,
     coordinator: AgentMeshCoordinator | None = None,
 ) -> InboxScanResult:
     _validate_max_messages(max_messages)
     mesh_root = Path(mesh_root)
     agent_id = validate_name(agent_id)
-    claimant_agent_id = validate_name(claimant_agent_id or agent_id)
     inbox = _inbox_dir(mesh_root, agent_id)
     processing = inbox / ".processing"
     invalid = inbox / ".invalid"
     processing.mkdir(parents=True, exist_ok=True)
     invalid.mkdir(parents=True, exist_ok=True)
-    writer = coordinator or AgentMeshCoordinator(mesh_root, claimant_agent_id)
+    writer = coordinator or AgentMeshCoordinator(mesh_root, agent_id)
     result = InboxScanResult()
 
     eligible = []
@@ -113,7 +112,7 @@ def claim_inbox_messages(
         claim_token = secrets.token_hex(16)
         sidecar = dest.with_name(dest.name + ".claim.json")
         sidecar_payload = {
-            "claimant_agent_id": claimant_agent_id,
+            "claimant_agent_id": agent_id,
             "claimed_at": writer.clock.time(),
             "claim_token": claim_token,
         }
@@ -152,11 +151,13 @@ def _create_claim_dir(processing: Path) -> Path:
 
 def acknowledge_claims(
     mesh_root: str | Path, agent_id: str, claims: list[dict[str, str]]
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     mesh_root = Path(mesh_root)
     processing = _processing_dir(mesh_root, agent_id)
     normalized = []
     for claim in claims:
+        if not isinstance(claim, dict):
+            raise ValueError("each claim must be a mapping")
         claim_id = validate_claim_id(claim.get("claim_id"))
         claim_token = claim.get("claim_token")
         if not isinstance(claim_token, str) or not claim_token:
@@ -177,31 +178,42 @@ def acknowledge_claims(
         if sidecar_data.get("claim_token") != claim_token:
             results.append({"claim_id": claim_id, "status": "token-mismatch"})
             continue
+        cleanup_errors = []
         try:
-            message.unlink()
-        except FileNotFoundError:
-            pass
-        try:
-            sidecar.unlink()
-        except FileNotFoundError:
-            pass
-        try:
+            try:
+                message.unlink()
+            except FileNotFoundError:
+                pass
+            try:
+                sidecar.unlink()
+            except FileNotFoundError:
+                pass
             claim_dir.rmdir()
         except FileNotFoundError:
             pass
-        results.append({"claim_id": claim_id, "status": "acknowledged"})
+        except OSError as exc:
+            cleanup_errors.append(str(exc))
+        if cleanup_errors:
+            results.append(
+                {
+                    "claim_id": claim_id,
+                    "status": "partial",
+                    "cleanup_errors": cleanup_errors,
+                }
+            )
+        else:
+            results.append({"claim_id": claim_id, "status": "acknowledged"})
     return results
 
 
 def scan_and_clear_inbox(
     mesh_root: str | Path,
     agent_id: str,
-    claimant_agent_id: str | None = None,
     max_messages: int = MAX_CLAIM_BATCH_SIZE,
     coordinator: AgentMeshCoordinator | None = None,
 ) -> InboxScanResult:
     result = claim_inbox_messages(
-        mesh_root, agent_id, claimant_agent_id, max_messages=max_messages, coordinator=coordinator
+        mesh_root, agent_id, max_messages=max_messages, coordinator=coordinator
     )
     result.ack_results = acknowledge_claims(
         mesh_root,
@@ -235,10 +247,10 @@ def inspect_claim_shape(claim_dir: Path) -> tuple[str, Path | None, Path | None]
     return "complete", message, sidecar
 
 
-def _claim_age_seconds(
+def claim_age_seconds(
     shape: str, claim_dir: Path, message: Path | None, sidecar: Path | None
 ) -> float:
-    now = __import__("time").time()
+    now = time.time()
     if shape == "complete" and sidecar is not None:
         try:
             claimed_at = json.loads(sidecar.read_text(encoding="utf-8"))["claimed_at"]
@@ -280,7 +292,7 @@ def recover_processing(
             results.append({"claim_id": claim_id, "status": "not-found"})
             continue
         shape, message, sidecar = inspect_claim_shape(claim_dir)
-        age = _claim_age_seconds(shape, claim_dir, message, sidecar)
+        age = claim_age_seconds(shape, claim_dir, message, sidecar)
         selected = normalized_claim_ids is not None or (
             older_than_seconds is not None and age >= older_than_seconds
         )
@@ -296,7 +308,13 @@ def recover_processing(
             results.append(row)
             continue
         if message is None:
-            row["status"] = "empty"
+            try:
+                claim_dir.rmdir()
+            except OSError as exc:
+                row["status"] = "partial"
+                row["cleanup_errors"] = [str(exc)]
+            else:
+                row["status"] = "recovered"
             results.append(row)
             continue
         dest_dir = inbox if action == "requeue" else inbox / ".invalid"

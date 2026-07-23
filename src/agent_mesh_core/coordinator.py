@@ -28,64 +28,10 @@ class _RealClock:
     time = staticmethod(time.time)
 
 
-class AgentMeshCoordinator:
-    def __init__(self, mesh_root_path: str | Path, agent_id: str, clock: Any | None = None):
-        self.agent_id = validate_name(agent_id)
+class MeshJsonWriter:
+    def __init__(self, mesh_root_path: str | Path):
         self.mesh_root = Path(mesh_root_path)
-        self.clock = clock or _RealClock()
         self.mesh_root.mkdir(parents=True, exist_ok=True)
-        (self.mesh_root / "agents" / self.agent_id / "inbox").mkdir(parents=True, exist_ok=True)
-        (self.mesh_root / "locks").mkdir(parents=True, exist_ok=True)
-
-    def _lock_dir(self, lock_name: str) -> Path:
-        return self.mesh_root / "locks" / validate_name(lock_name)
-
-    def _write_lock_token(self, token_file: Path, token: str) -> None:
-        token_file.write_text(token, encoding="utf-8")
-
-    def acquire_lock(
-        self, lock_name: str, timeout: float = 0, retry_interval: float = 0.1
-    ) -> LockHandle | None:
-        lock_dir = self._lock_dir(lock_name)
-        deadline = self.clock.monotonic() + max(timeout, 0)
-        while True:
-            try:
-                os.mkdir(lock_dir)
-            except FileExistsError:
-                if self.clock.monotonic() >= deadline:
-                    return None
-                self.clock.sleep(retry_interval)
-                continue
-
-            token = secrets.token_hex(16)
-            try:
-                self._write_lock_token(lock_dir / "owner.token", token)
-            except Exception:
-                try:
-                    os.rmdir(lock_dir)
-                except OSError:
-                    pass
-                if self.clock.monotonic() >= deadline:
-                    return None
-                self.clock.sleep(retry_interval)
-                continue
-            return LockHandle(validate_name(lock_name), token)
-
-    def release_lock(self, handle: LockHandle) -> None:
-        lock_name = validate_name(handle.lock_name)
-        lock_dir = self.mesh_root / "locks" / lock_name
-        token_file = lock_dir / "owner.token"
-        try:
-            token = token_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return
-        if token != handle.token:
-            return
-        try:
-            os.remove(token_file)
-        except FileNotFoundError:
-            return
-        os.rmdir(lock_dir)
 
     def _assert_under_mesh_no_symlinks(self, target_file_path: Path) -> Path:
         target = Path(target_file_path)
@@ -151,6 +97,65 @@ class AgentMeshCoordinator:
         finally:
             os.close(dir_fd)
 
+
+class AgentMeshCoordinator(MeshJsonWriter):
+    def __init__(self, mesh_root_path: str | Path, agent_id: str, clock: Any | None = None):
+        self.agent_id = validate_name(agent_id)
+        super().__init__(mesh_root_path)
+        self.clock = clock or _RealClock()
+        (self.mesh_root / "agents" / self.agent_id / "inbox").mkdir(parents=True, exist_ok=True)
+        (self.mesh_root / "locks").mkdir(parents=True, exist_ok=True)
+
+    def _lock_dir(self, lock_name: str) -> Path:
+        return self.mesh_root / "locks" / validate_name(lock_name)
+
+    def _write_lock_token(self, token_file: Path, token: str) -> None:
+        token_file.write_text(token, encoding="utf-8")
+
+    def acquire_lock(
+        self, lock_name: str, timeout: float = 0, retry_interval: float = 0.1
+    ) -> LockHandle | None:
+        lock_dir = self._lock_dir(lock_name)
+        deadline = self.clock.monotonic() + max(timeout, 0)
+        while True:
+            try:
+                os.mkdir(lock_dir)
+            except FileExistsError:
+                if self.clock.monotonic() >= deadline:
+                    return None
+                self.clock.sleep(retry_interval)
+                continue
+
+            token = secrets.token_hex(16)
+            try:
+                self._write_lock_token(lock_dir / "owner.token", token)
+            except Exception:
+                try:
+                    os.rmdir(lock_dir)
+                except OSError:
+                    pass
+                if self.clock.monotonic() >= deadline:
+                    return None
+                self.clock.sleep(retry_interval)
+                continue
+            return LockHandle(validate_name(lock_name), token)
+
+    def release_lock(self, handle: LockHandle) -> None:
+        lock_name = validate_name(handle.lock_name)
+        lock_dir = self.mesh_root / "locks" / lock_name
+        token_file = lock_dir / "owner.token"
+        try:
+            token = token_file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        if token != handle.token:
+            return
+        try:
+            os.remove(token_file)
+        except FileNotFoundError:
+            return
+        os.rmdir(lock_dir)
+
     def update_state(
         self,
         status: str,
@@ -161,8 +166,8 @@ class AgentMeshCoordinator:
             "agent_id": self.agent_id,
             "timestamp": self.clock.time(),
             "status": status,
-            "active_tasks": tasks or [],
-            "metadata": extra_metadata or {},
+            "active_tasks": [] if tasks is None else tasks,
+            "metadata": {} if extra_metadata is None else extra_metadata,
         }
         self.atomic_write_json(self.mesh_root / "agents" / self.agent_id / "state.json", payload)
 
@@ -212,7 +217,7 @@ class AgentMeshCoordinator:
             raise ValueError(f"invalid message type {message_type!r}")
 
     def health_check(self) -> dict[str, Any]:
-        from agent_mesh_core.inbox import _claim_age_seconds, inspect_claim_shape
+        from agent_mesh_core.inbox import claim_age_seconds, inspect_claim_shape
 
         agents = []
         agents_dir = self.mesh_root / "agents"
@@ -228,7 +233,7 @@ class AgentMeshCoordinator:
                             {
                                 "claim_id": claim_dir.name,
                                 "shape": shape,
-                                "age_seconds": _claim_age_seconds(
+                                "age_seconds": claim_age_seconds(
                                     shape, claim_dir, message, sidecar
                                 ),
                             }

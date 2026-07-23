@@ -29,6 +29,7 @@ def test_atomic_write_json_rejects_symlink_component(mesh_root):
 
     with pytest.raises(ValueError):
         coordinator.atomic_write_json(mesh_root / "link" / "x.json", {"a": 1})
+    assert not (real_dir / "x.json").exists()
 
 
 def test_replace_failure_cleans_temp_and_leaves_target(monkeypatch, mesh_root):
