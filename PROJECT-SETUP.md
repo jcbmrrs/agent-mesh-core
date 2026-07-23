@@ -48,10 +48,9 @@ Thumbs.db
 
 ```
 
-## Step 2: Create a `deploy.sh` Script
-Instead of writing code directly in the shared folder, edit it inside your Git repository. When you make a change, use this simple deployment shell script to push the clean scripts and base configuration files out to the active shared folder.
+## Step 2: Create a `deploy.sh` Script (historical, superseded — do not run as written)
 
-Save this as `deploy.sh` in your Git repo:
+~~Save this as `deploy.sh` in your Git repo~~ — the actual `deploy.sh` per `IMPLEMENTATION_PLAN.md` does not `cp` any code (`agent_core.py` doesn't exist; the real package is `src/agent_mesh_core/`, installed on each machine via its own `git pull`/`uv sync`) and does not reimplement the "don't overwrite" check in bash. Read below for the original *intent* only.
 
 ```bash
 

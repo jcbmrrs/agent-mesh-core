@@ -23,14 +23,14 @@ Please execute the following steps sequentially directly on this system:
      - `agents/agent_mbp/inbox/`
      - `agents/agent_ollama_local/inbox/`
 
-3. **Deploy Core Coordination Scripts**:
-   - Create a Python file named `/Users/Shared/AgentMesh/agent_core.py` containing an `AgentMeshCoordinator` class that handles:
+3. **(historical, superseded — do not run) Deploy Core Coordination Scripts**:
+   - ~~Create a Python file named `/Users/Shared/AgentMesh/agent_core.py`~~ — do not do this; see the Amendment below. Original intent, for reference: an `AgentMeshCoordinator` class that handles:
      - Atomic directory-based locks (`os.mkdir` / `os.rmdir`) to prevent race conditions over cross-platform SMB mounts.
      - Atomic JSON operations using local hidden temporary files shifted seamlessly via `shutil.move` to prevent packet-drop JSON corruptions over Tailscale links.
      - An inbox scanning function that processes messages and deletes them out of the agent's inbox folder upon reading.
 
-4. **Populate Initial Base Rules**:
-   - Create a base configuration file at `config/local_rules.json`. Include boilerplate configuration metadata detailing global network context, active model overrides for Claude/Ollama, and exclusion guidelines for file tree indexes.
+4. **(historical, superseded — do not run as written) Populate Initial Base Rules**:
+   - ~~Create a base configuration file at `config/local_rules.json`~~ directly — this is done via `bootstrap_mesh`/`agent-mesh-bootstrap`, not by an agent writing the file by hand. Original intent, for reference: base configuration metadata detailing global network context, active model overrides for Claude/Ollama, and exclusion guidelines for file tree indexes.
 
 5. **Provide the System Automation Strategy**:
    - Write a short utility script or outline the specific macOS native CLI commands (`sharing` utility, `dscl` commands, or UI guidance) to cleanly export this directory via SMB, ensuring proper Read/Write access flags are pinned for Tailscale connected nodes.

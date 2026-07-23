@@ -25,9 +25,9 @@ To avoid file-locking conflicts across macOS, Windows, and Linux, agents do not 
 └── 📁 locks/                        # Used for cluster-wide atomic mutual exclusion
 ```
 
-## 2. Python Boilerplate Scripts
+## 2. Python Boilerplate Scripts (historical, superseded — do not run)
 
-Save this as `agent_core.py` on your machines. It provides robust, cross-platform file utilities that prevent data corruption and race conditions over SMB networks.
+~~Save this as `agent_core.py` on your machines.~~ Do not do this — no code is ever placed on the live share or run from this snippet. It provides robust, cross-platform file utilities that prevent data corruption and race conditions over SMB networks — that intent is real, but the implementation below is the pre-review draft with known bugs (PID-based temp names, no path validation, no lock ownership check, read-then-delete inbox handling). The corrected version is `src/agent_mesh_core/` per `IMPLEMENTATION_PLAN.md`.
 
 ```python
 
