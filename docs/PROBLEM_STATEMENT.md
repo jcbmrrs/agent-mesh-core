@@ -19,7 +19,7 @@ writes — breaks under concurrent access: partial writes corrupt JSON,
 locking (macOS AFP-ish semantics vs. Linux POSIX vs. Windows oplocks) can't
 be trusted to serialize access safely, especially over a network mount.
 
-## Proposed solution (current design, per IMPLEMENTATION_PLAN.md / AGENTS.md)
+## Proposed solution (current design, per IMPLEMENTATION_PLAN_v2.md / AGENTS.md)
 
 > **Decision (2026-07-23): resolved.** Running a small always-on local
 > service is acceptable. The mesh's coordination logic now runs as a local
@@ -89,5 +89,6 @@ This resolves the open question cleanly:
   provisioned or mounted by clients), rather than merely deferring it.
 
 See `SOLUTION_RECOMMENDATION.md` for the full synthesis and
-`IMPLEMENTATION_PLAN.md`'s "Resolved after MCP-server pivot decision"
-section for the concrete scope changes.
+`IMPLEMENTATION_PLAN_v2.md` for the concrete build plan (rewritten with
+this decision as its baseline, rather than a patch on the older,
+now-archived `docs/archive/IMPLEMENTATION_PLAN_v1.md`).

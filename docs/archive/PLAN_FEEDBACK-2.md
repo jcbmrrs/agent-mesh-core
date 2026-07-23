@@ -1,5 +1,7 @@
 # Second Adversarial Review of `IMPLEMENTATION_PLAN.md`
 
+> **Archived (2026-07-23) — historical record.** Every finding here was resolved and its resolution folded into `../IMPLEMENTATION_PLAN_v2.md`'s design invariants. Kept for the reasoning trail, not as living guidance.
+
 ## Findings
 
 1. **High: atomic inbox claiming creates a new stuck-message failure mode.**

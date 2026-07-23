@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-This directory is currently **design/planning stage only** — it contains no source code, build tooling, or tests yet. `docs/IMPLEMENTATION_PLAN.md` is the concrete build plan; `docs/archive/` holds the original design drafts (`BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`, `PROJECT-SETUP.md`) for historical/rationale value only — they describe an earlier, superseded SMB-mount transport (see "Architecture decision" below) and should never be implemented literally. There is no `agent_core.py`, no `config/`, `agents/`, or `locks/` directory, and no test suite to run. When asked to "implement" or "set this up," treat `docs/IMPLEMENTATION_PLAN.md` as the task spec.
+This directory is currently **design/planning stage only** — it contains no source code, build tooling, or tests yet. `docs/IMPLEMENTATION_PLAN_v2.md` is the concrete build plan; `docs/archive/` holds the original design drafts (`BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`, `PROJECT-SETUP.md`) for historical/rationale value only — they describe an earlier, superseded SMB-mount transport (see "Architecture decision" below) and should never be implemented literally. There is no `agent_core.py`, no `config/`, `agents/`, or `locks/` directory, and no test suite to run. When asked to "implement" or "set this up," treat `docs/IMPLEMENTATION_PLAN_v2.md` as the task spec.
 
 ## Architecture decision (2026-07-23): MCP server, not a mounted SMB share
 
@@ -18,7 +18,7 @@ Almost everything else about the design — the mailbox/lock/atomic-write/claim-
 
 Two distinct zones, never conflated:
 
-- **This git repo** — source of truth for logic: the `src/agent_mesh_core/` package (see `docs/IMPLEMENTATION_PLAN.md`), templates (`config/*.template.json`), `deploy.sh`, and the docs in `docs/`. Fully version-controlled; a bad change to lock mechanics is one `git revert` away.
+- **This git repo** — source of truth for logic: the `src/agent_mesh_core/` package (see `docs/IMPLEMENTATION_PLAN_v2.md`), templates (`config/*.template.json`), `deploy.sh`, and the docs in `docs/`. Fully version-controlled; a bad change to lock mechanics is one `git revert` away.
 - **`/Users/Shared/AgentMesh`** — the live data share, now local disk on the Mac mini only. Populated *from* this repo via `deploy.sh`, never edited directly and never git-tracked (see `.gitignore`). It holds runtime state only: `agents/*/inbox/`, `agents/*/state.json`, `locks/`, and the deployed `config/local_rules.json`. Other machines never touch it directly — they go through the MCP server (or HTTP wrapper) that runs on the Mac mini.
 
 Why the split: it keeps Claude Code/Codex context windows clean (no wading through megabytes of agent heartbeats or old inbox messages) and makes logic bugs revertible without destroying live agent state.
@@ -39,7 +39,7 @@ Design principle: **no single shared mutable file.** Even with only the Mac mini
 AgentMesh/
 ├── config/
 │   ├── local_rules.json      # read-only rules/config for all agents
-│   └── file_trees.json       # aggregated file-tree structures of the cluster (not built in v1 — see docs/IMPLEMENTATION_PLAN.md)
+│   └── file_trees.json       # aggregated file-tree structures of the cluster (not built in v1 — see docs/IMPLEMENTATION_PLAN_v2.md)
 ├── agents/
 │   ├── agent_mac_mini/
 │   │   ├── inbox/            # other agents drop messages here
@@ -65,7 +65,7 @@ Key invariants any implementation here must preserve:
 - **Filesystem watchers are a v2 concern, not v1.** v1 ships polling-only (`scan_and_clear_inbox`); prefer watchers (e.g. Python's `watchdog`) over tighter polling loops once there's an actual latency need.
 - **`config/local_rules.json` is read-only for agents** — it's written only by the human operator (via `bootstrap_mesh`/`deploy.sh`), not by any agent process at runtime. The same single-writer rule applies to `file_trees.json` whenever it's eventually built.
 
-## Coordinator API shape (`src/agent_mesh_core/`, per `docs/IMPLEMENTATION_PLAN.md`)
+## Coordinator API shape (`src/agent_mesh_core/`, per `docs/IMPLEMENTATION_PLAN_v2.md`)
 
 The archived `PROMPT.md` names a deployed `/Users/Shared/AgentMesh/agent_core.py` — that's superseded (see "Repo vs. live share split" above): the real package is `src/agent_mesh_core/`, an `AgentMeshCoordinator` class in `coordinator.py`, instantiated per-agent with `(mesh_root_path, agent_id)`, and running only inside the Mac mini's MCP server process. Expected surface:
 
@@ -78,7 +78,7 @@ The archived `PROMPT.md` names a deployed `/Users/Shared/AgentMesh/agent_core.py
 - `recover_processing(mesh_root, agent_id, older_than_seconds=None, claim_ids=None, action=None)` (`inbox.py`) — operator-invoked only, never automatic, meant to be run while the target agent is stopped; reports, requeues, or quarantines claims left behind by a crashed/killed claimant across all four orphan shapes uniformly, selected by age heuristic or by explicit `claim_ids`; fails closed on a requeue/quarantine destination collision. **Not exposed as an MCP tool** — admin-only, run directly on the Mac mini.
 - `bootstrap_mesh` (`bootstrap.py`) — operator/admin tooling: wires coordinator init + `local_rules.json` templating for a set of agent IDs (rejecting duplicate IDs after lowercase normalization); what `deploy.sh` actually calls. **Not exposed as an MCP tool.**
 
-The `mcp_server.py` module that wraps the tool-flagged methods above as MCP tools is planned but not yet designed in detail — see `docs/IMPLEMENTATION_PLAN.md`'s "Resolved after MCP-server pivot decision" section.
+The `mcp_server.py` module that wraps the tool-flagged methods above as MCP tools is planned but not yet designed in detail — see `docs/IMPLEMENTATION_PLAN_v2.md`'s "Confirmed scope" section.
 
 ## Network/transport notes
 
@@ -90,15 +90,15 @@ The `mcp_server.py` module that wraps the tool-flagged methods above as MCP tool
 ## Documentation layout
 
 - Root: `CLAUDE.md` (points at this file) and `AGENTS.md` (this file) only — kept at root so they stay visible to any agent starting cold in this repo.
-- `docs/` — currently-applicable design/planning docs: `IMPLEMENTATION_PLAN.md` (the build plan), `PROBLEM_STATEMENT.md`, `SOLUTION_LANDSCAPE.md`, `CLAUDE-SOLUTION-LANDSCAPE.md`, `SOLUTION_RECOMMENDATION.md` (the research/decision trail behind the MCP-server pivot), and `PLAN_FEEDBACK.md` / `PLAN_FEEDBACK-2.md` / `PLAN_FEEDBACK-3.md` / `PLAN_FEEDBACK-4.md` (adversarial reviews — the reasoning behind the lock/claim/atomic-write logic that carries forward unchanged into the MCP-server design).
-- `docs/archive/` — superseded drafts, kept for historical/rationale value only, never to be implemented literally: `BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`, `PROJECT-SETUP.md`. All four describe the pre-pivot SMB-mount transport.
+- `docs/` — currently-applicable design/planning docs: `IMPLEMENTATION_PLAN_v2.md` (the build plan), `PROBLEM_STATEMENT.md`, `SOLUTION_LANDSCAPE.md`, `CLAUDE-SOLUTION-LANDSCAPE.md`, `SOLUTION_RECOMMENDATION.md` (the research/decision trail behind the MCP-server pivot).
+- `docs/archive/` — superseded drafts and fully-absorbed historical inputs, kept for rationale value only, never to be implemented/re-litigated literally: `BACKGROUND.md`, `MULTI-AGENT-GUIDE.md`, `PROMPT.md`, `PROJECT-SETUP.md` (the pre-pivot SMB-mount design), `IMPLEMENTATION_PLAN_v1.md` (the original plan, patched across four reviews plus the MCP-server pivot before being replaced by v2), and `PLAN_FEEDBACK.md` / `PLAN_FEEDBACK-2.md` / `PLAN_FEEDBACK-3.md` / `PLAN_FEEDBACK-4.md` (the adversarial reviews whose findings are now just stated directly as v2's design invariants).
 
 ## Keep in sync
 
 - `docs/archive/MULTI-AGENT-GUIDE.md` (directory structure + `agent_core.py` boilerplate) ↔ this file's "Planned architecture" and "Coordinator API shape" sections — if the boilerplate class/method signatures change, update the summary here too.
-- `docs/archive/PROMPT.md` (task spec, as amended) ↔ `docs/IMPLEMENTATION_PLAN.md` — if the scope changes, the Logic Gate triage and TDD cycle list in the plan need to change with it.
+- `docs/archive/PROMPT.md` (task spec, as amended) ↔ `docs/IMPLEMENTATION_PLAN_v2.md` — if the scope changes, the Logic Gate triage and TDD cycle list in the plan need to change with it.
 - `docs/archive/BACKGROUND.md` (Q&A on hosts/agents/OSes) ↔ this file's "Network/transport notes" — if the set of client machines/OSes changes, update both the Q&A answers and the transport notes.
-- `docs/archive/PROJECT-SETUP.md` (`deploy.sh`, `.gitignore` recommendations) ↔ this repo's actual `.gitignore` and `docs/IMPLEMENTATION_PLAN.md`'s "Deployment" section — if the deploy mechanism or ignored-path list changes in one, update the other.
-- `docs/PLAN_FEEDBACK.md` / `PLAN_FEEDBACK-2.md` / `PLAN_FEEDBACK-3.md` / `PLAN_FEEDBACK-4.md` (adversarial reviews) ↔ `docs/IMPLEMENTATION_PLAN.md`'s "Resolved after..." sections and this file's invariants — if a future review lands, add its resolutions the same way rather than editing history away.
-- The **superseded banners and inline "(historical, superseded)" markers** in `docs/archive/MULTI-AGENT-GUIDE.md`, `docs/archive/PROJECT-SETUP.md`, and `docs/archive/PROMPT.md` ↔ whatever `docs/IMPLEMENTATION_PLAN.md` currently says supersedes them — if the v1 design changes again, update both the top banners and the inline markers, don't just let them go stale.
-- `docs/PROBLEM_STATEMENT.md` / `docs/SOLUTION_RECOMMENDATION.md` (the MCP-server pivot decision) ↔ this file's "Architecture decision" section and `docs/IMPLEMENTATION_PLAN.md`'s "Resolved after MCP-server pivot decision" section — if the transport decision is ever revisited, update all three together.
+- `docs/archive/PROJECT-SETUP.md` (`deploy.sh`, `.gitignore` recommendations) ↔ this repo's actual `.gitignore` and `docs/IMPLEMENTATION_PLAN_v2.md`'s "Deployment" section — if the deploy mechanism or ignored-path list changes in one, update the other.
+- `docs/archive/PLAN_FEEDBACK.md` / `PLAN_FEEDBACK-2.md` / `PLAN_FEEDBACK-3.md` / `PLAN_FEEDBACK-4.md` (adversarial reviews, fully absorbed) and `docs/archive/IMPLEMENTATION_PLAN_v1.md` (the pre-v2 plan they patched) ↔ `docs/IMPLEMENTATION_PLAN_v2.md`'s "Design invariants" section and this file's invariants — if a future review lands, fold its resolutions into v2's invariants directly rather than starting a new patch chain.
+- The **superseded banners and inline "(historical, superseded)" markers** in `docs/archive/MULTI-AGENT-GUIDE.md`, `docs/archive/PROJECT-SETUP.md`, and `docs/archive/PROMPT.md` ↔ whatever `docs/IMPLEMENTATION_PLAN_v2.md` currently says supersedes them — if the design changes again, update both the top banners and the inline markers, don't just let them go stale.
+- `docs/PROBLEM_STATEMENT.md` / `docs/SOLUTION_RECOMMENDATION.md` (the MCP-server pivot decision) ↔ this file's "Architecture decision" section and `docs/IMPLEMENTATION_PLAN_v2.md`'s Context section — if the transport decision is ever revisited, update all three together.

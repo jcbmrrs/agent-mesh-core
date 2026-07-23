@@ -1,4 +1,6 @@
-# AgentMesh Core — Implementation Plan (TDD-first)
+# AgentMesh Core — Implementation Plan (TDD-first) — v1, archived
+
+> **Archived (2026-07-23) — superseded by `../IMPLEMENTATION_PLAN_v2.md`.** This is the original plan, written for the SMB-mount-by-every-client design and then patched in place across four adversarial reviews plus the MCP-server pivot decision. All of its correctness decisions (lock ownership tokens, atomic claim-then-process inbox handling, name/path/symlink validation) carry forward into v2 unchanged; only the transport framing is gone. Kept for the incremental derivation — read `IMPLEMENTATION_PLAN_v2.md` for the current plan.
 
 ## Context
 
