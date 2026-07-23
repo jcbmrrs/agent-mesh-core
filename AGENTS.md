@@ -61,4 +61,6 @@ Any script that provisions the SMB share itself (vs. just consuming it) should p
 
 ## Keep in sync
 
-- TODO: list file pairs that must agree, e.g. "add a setting → document it in the README".
+- `MULTI-AGENT-GUIDE.md` (directory structure + `agent_core.py` boilerplate) ↔ this file's "Planned architecture" and "Coordinator API shape" sections — if the boilerplate class/method signatures change, update the summary here too.
+- `PROMPT.md` (task spec) ↔ `IMPLEMENTATION_PLAN.md` — if the scope in PROMPT.md changes (e.g. dropping the SMB provisioning step), the Logic Gate triage and TDD cycle list in the plan need to change with it.
+- `BACKGROUND.md` (Q&A on hosts/agents/OSes) ↔ this file's "Network/transport notes" — if the set of client machines/OSes changes, update both the Q&A answers and the transport notes.
