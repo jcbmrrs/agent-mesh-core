@@ -29,7 +29,7 @@ Design principle: **no single shared mutable file.** SMB's cross-platform lockin
 AgentMesh/
 ├── config/
 │   ├── local_rules.json      # read-only rules/config for all agents
-│   └── file_trees.json       # aggregated file-tree structures of the cluster
+│   └── file_trees.json       # aggregated file-tree structures of the cluster (not built in v1 — see IMPLEMENTATION_PLAN.md)
 ├── agents/
 │   ├── agent_mac_mini/
 │   │   ├── inbox/            # other agents drop messages here
@@ -46,20 +46,24 @@ AgentMesh/
 Key invariants any implementation here must preserve:
 
 - **One inbox per agent, not a shared queue.** Each agent only ever writes into *another* agent's `inbox/`, never into a shared global file, to avoid concurrent-write collisions.
-- **Atomic writes only.** Never write JSON directly to its destination path. Write to a temp file in the same directory (e.g. `.tmp_<name>_<pid>`), then `shutil.move`/rename over the target — this is the only write pattern that's safe across SMB.
-- **Locking is directory-creation based**, not file-based: `os.mkdir()` on a path under `locks/` is atomic on every target OS (Mac/Linux/Windows), so lock acquisition = successful `mkdir`, release = `rmdir`. Never implement locks with a plain lock *file* (`open(...,'x')`) — the design explicitly calls out that only directory creation is guaranteed atomic across the mixed-OS mount.
-- **Prefer filesystem watchers over polling** (e.g. Python's `watchdog`) for reacting to new inbox messages, to avoid hammering the SMB-mounted drive from multiple machines.
-- **`config/local_rules.json` is read-only for agents** — it's written only by the human operator, not by any agent process.
+- **Atomic writes only.** Never write JSON directly to its destination path. Write to a temp file in the same directory with a collision-resistant name (`tempfile.mkstemp`, not PID-based — PIDs collide across machines), then `os.replace`/rename over the target — this is the only write pattern that's safe across SMB.
+- **Locking is directory-creation based**, not file-based: `os.mkdir()` on a path under `locks/` is atomic on every target OS (Mac/Linux/Windows), so lock acquisition = successful `mkdir`, release = `rmdir`. Never implement locks with a plain lock *file* (`open(...,'x')`) — the design explicitly calls out that only directory creation is guaranteed atomic across the mixed-OS mount. **No stale-lock breaking in v1** — mtime-based staleness is unsafe under SMB clock skew and would need an ownership-token protocol to be safe; that's deferred, not silently built.
+- **Agent IDs, lock names, and target agent IDs are validated** before they become path components (strict portable pattern, no separators/`..`/absolute paths) — they're attacker- or typo-controlled inputs that would otherwise let a bad name escape the mesh root.
+- **Inbox messages are claimed before processing** (atomic rename into a `.processing/` subdir), not just read-then-deleted, so two scans of the same inbox can't double-process one message. Malformed messages are quarantined (renamed aside), never left in place for a watcher/re-scan to rediscover forever.
+- **Filesystem watchers are a v2 concern, not v1.** v1 ships polling-only (`scan_and_clear_inbox`); prefer watchers (e.g. Python's `watchdog`) over tighter polling loops once there's an actual latency need, to avoid hammering the SMB-mounted drive from multiple machines.
+- **`config/local_rules.json` is read-only for agents** — it's written only by the human operator, not by any agent process. The same single-writer rule applies to `file_trees.json` whenever it's eventually built.
 
-## Coordinator API shape (agent_core.py, per PROMPT.md)
+## Coordinator API shape (`src/agent_mesh_core/`, per PROMPT.md and IMPLEMENTATION_PLAN.md)
 
-The core coordination script is expected to be named `agent_core.py` and expose an `AgentMeshCoordinator` class, instantiated per-agent with `(mesh_root_path, agent_id)`. Expected methods:
+`PROMPT.md` names a deployed `/Users/Shared/AgentMesh/agent_core.py` — that's superseded (see "Repo vs. live share split" above): the real package is `src/agent_mesh_core/`, an `AgentMeshCoordinator` class in `coordinator.py`, instantiated per-agent with `(mesh_root_path, agent_id)`. Expected surface:
 
-- `acquire_lock(lock_name, timeout, retry_interval)` / `release_lock(lock_name)` — directory-based mutual exclusion under `locks/`.
+- `validate_name(name)` (`names.py`) — rejects anything unsafe as a path component; called by every method below before touching a name-derived path.
+- `acquire_lock(lock_name, timeout, retry_interval)` / `release_lock(lock_name)` — directory-based mutual exclusion under `locks/`. No stale-lock breaking in v1.
 - `atomic_write_json(target_file_path, data)` — temp-file-then-move write for any JSON in the mesh.
 - `update_state(status, tasks, extra_metadata)` — writes this agent's own `agents/<agent_id>/state.json`.
 - `send_message(target_agent_id, message_type, payload)` — atomically drops a timestamped JSON message into another agent's `inbox/`.
-- An inbox-scanning function (not yet in the boilerplate) that reads and then deletes processed messages from `agents/<agent_id>/inbox/`.
+- `scan_and_clear_inbox` (`inbox.py`) — claims each message via atomic rename into `.processing/`, then reads/deletes it; quarantines malformed JSON instead of leaving it in place.
+- `bootstrap_mesh` (`bootstrap.py`) — wires coordinator init + `local_rules.json` templating for a set of agent IDs; what `deploy.sh` actually calls.
 
 ## Network/transport notes
 
