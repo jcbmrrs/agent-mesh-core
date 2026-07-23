@@ -1,5 +1,7 @@
 # Adversarial Review Feedback for `IMPLEMENTATION_PLAN_v2.md`
 
+> **Archived (2026-07-23) — historical record.** Findings 4, 8, 9, 10, 11 and part of 1/2/3/5/6 were accepted and folded directly into `../IMPLEMENTATION_PLAN_v2.md` (new "MCP/HTTP API design" and "Operational readiness" sections, the inbox claim/acknowledge split, the versioned message envelope, `read_local_rules`, and the `deploy.sh` env-var override). Findings 3, 6, and 7 were partially pushed back on: full anti-spoofing/session authorization and `openat`-style TOCTOU hardening were judged out of scope given the trust model (a single-operator, 2–3-machine personal mesh reachable only over Jacob's own Tailscale tailnet) — v2 now states that trust boundary explicitly rather than leaving it implicit. Kept for the reasoning trail, not as living guidance.
+
 Review date: 2026-07-23
 
 ## Findings

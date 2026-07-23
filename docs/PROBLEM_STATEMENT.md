@@ -48,10 +48,12 @@ entirely around patterns designed to avoid concurrent mutable-file access:
 - **Claim-then-process inbox scanning**, so two scans of the same inbox
   can't double-handle one message, with crash recovery as an explicit,
   human-invoked operation, never automatic.
-- A strict repo/live-share split: logic lives in this git repo and is
-  installed independently on each machine (`git pull` + `uv sync`); the live
-  share holds only data and is never git-tracked, so a bad code change is a
-  `git revert` away and never touches live agent state.
+- A strict repo/live-share split: logic lives in this git repo. **As of the
+  MCP-server pivot, only the Mac mini installs and runs this package**
+  (`git pull` + `uv sync`) — other machines never install it; they call it
+  as MCP/HTTP clients. The live share holds only data and is never
+  git-tracked, so a bad code change is a `git revert` away and never
+  touches live agent state.
 
 Four rounds of adversarial review have hardened this design against a long
 list of crash/edge cases (symlink escapes, malformed messages, claim-ID
