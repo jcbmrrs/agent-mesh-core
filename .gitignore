@@ -1,0 +1,5 @@
+
+# secrets live here — never commit them (added by agent-standard adopt)
+.env
+.env.*
+!.env.example
