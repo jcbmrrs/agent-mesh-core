@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -12,6 +13,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from agent_mesh_core.dispatch import MeshDispatch
+from agent_mesh_core.mcp_server import validate_mesh_root
 
 # Exceptions MeshDispatch lets propagate unmapped for expected, caller-facing
 # failures. Mapped to an HTTP status code here, at this wrapper's own
@@ -108,7 +110,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args(argv)
 
-    app = build_app(args.mesh_root)
+    try:
+        mesh_root = validate_mesh_root(args.mesh_root)
+    except ValueError as exc:
+        print(f"agent-mesh-http-server: {exc}", file=sys.stderr)
+        return 2
+
+    app = build_app(mesh_root)
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

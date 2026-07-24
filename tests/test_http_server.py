@@ -4,12 +4,32 @@ from starlette.testclient import TestClient
 
 from agent_mesh_core import AgentMeshCoordinator
 from agent_mesh_core.dispatch import EXPOSED_OPERATIONS
-from agent_mesh_core.http_server import build_app
+from agent_mesh_core.http_server import build_app, main
 from agent_mesh_core.rules_template import write_local_rules_template
 
 
 def _client(mesh_root) -> TestClient:
     return TestClient(build_app(mesh_root))
+
+
+def test_main_validates_mesh_root_before_building_app(tmp_path, monkeypatch):
+    missing = tmp_path / "missing"
+
+    def fail_if_called(mesh_root):
+        raise AssertionError(f"build_app should not be called for {mesh_root}")
+
+    monkeypatch.setattr("agent_mesh_core.http_server.build_app", fail_if_called)
+
+    assert main(["--mesh-root", str(missing)]) == 2
+
+
+def test_main_reports_validation_error_on_stderr(tmp_path, capsys):
+    missing = tmp_path / "missing"
+
+    main(["--mesh-root", str(missing)])
+
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
 
 
 def test_exposes_exactly_the_documented_routes(mesh_root):

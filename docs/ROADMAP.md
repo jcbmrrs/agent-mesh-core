@@ -16,7 +16,7 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 
 **Project**: agent-mesh-core
 **Stack**: Python 3.11+, uv-managed package, pytest + ruff, FastMCP 2.x (streamable HTTP) + Starlette/uvicorn
-**Status**: Deployed — MCP server and Ollama HTTP wrapper both built, tested, and verified end-to-end against a real Mac mini + MBP pair over Tailscale. Open follow-up: a persistent `launchd` service for the HTTP wrapper (it currently only runs on demand).
+**Status**: Deployed — MCP server and Ollama HTTP wrapper both built, tested, and verified end-to-end against a real Mac mini + MBP pair over Tailscale, and both now run as persistent `launchd` services on the Mac mini.
 
 ## Roadmap
 
@@ -33,41 +33,11 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-9**~~ | ✅ **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | ✅ DONE (2026-07-23) | FEATURE-8 |
 | ~~**TASK-10**~~ | ✅ **Operational readiness: launchd plist, logging, startup validation** | **P2** | ✅ DONE (2026-07-24) | FEATURE-8 |
 | ~~**TASK-11**~~ | ✅ **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | ✅ DONE (2026-07-23) | FEATURE-8, TASK-10 |
-| **TASK-12** | **Persistent launchd service for the Ollama HTTP wrapper** | **P2** | PLANNED | TASK-11 |
+| ~~**TASK-12**~~ | ✅ **Persistent launchd service for the Ollama HTTP wrapper** | **P2** | ✅ DONE (2026-07-23) | TASK-11 |
 | **TASK-13** | **README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps** | **P2** | PLANNED | TASK-11 |
+| **TASK-14** | **Public-release readiness: security, license, examples, personal-data scrub** | **P2** | PLANNED | TASK-13 |
 
 ## Active Work
-
-### TASK-12: Persistent launchd service for the Ollama HTTP wrapper (PLANNED)
-**Priority**: P2
-**Status**: PLANNED (2026-07-23)
-
-`TASK-11` confirmed `http_server.py` works correctly, but only started
-manually (`agent-mesh-http-server`, foreground, stopped by hand). It has
-no `launchd` plist, unlike the MCP server (`TASK-10`). Mirror that
-existing pattern rather than inventing a new one: same template-render
-approach (`deploy/launchd/render_mcp_launchd_plist.py` is
-MCP-server-specific — either generalize it or add a sibling
-`render_http_launchd_plist.py`), same log-directory convention, same
-`RunAtLoad`/`KeepAlive` behavior, bound to the Mac mini's Tailscale IP on
-its own port (8001, as used in the `TASK-11` smoke test) so it doesn't
-collide with the MCP server's port 8000.
-
-Review finding after `TASK-11`: unlike `agent-mesh-mcp-server`,
-`agent-mesh-http-server` currently does not validate `--mesh-root` before
-starting. A bad path can run until the first request fails confusingly, and
-`/health_check` can instantiate `MeshJsonWriter`, creating a missing root as
-a side effect. Fix this as part of making the HTTP wrapper persistent:
-reuse/share the MCP startup validation behavior so the HTTP service also
-fails fast when the mesh root does not exist, is not a directory, or is not
-writable.
-
-**Tasks**:
-- [ ] Add startup validation to `agent-mesh-http-server`, sharing the MCP server's mesh-root validation behavior
-- [ ] Add a launchd plist template for `agent-mesh-http-server`, following the existing MCP-server template's structure
-- [ ] Render and load it on the Mac mini bound to `100.88.189.11:8001`
-- [ ] Verify `/health_check` responds via plain `curl` after a fresh `launchctl bootstrap` (not just while a manually-started process happened to still be running)
-- [ ] Update `docs/OPERATIONS.md` (or wherever `TASK-10`'s launchd docs live) to cover both services, not just the MCP server
 
 ### TASK-13: README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps (PLANNED)
 **Priority**: P2
@@ -105,14 +75,66 @@ in scope:
    role somewhere else, or a from-scratch clone for local development:
    `git clone` + `uv sync`, running the test suite, `deploy.sh`'s env-var
    overrides (`MESH_ROOT`, `AGENT_IDS`).
+4. **Public-facing positioning**: if this repo becomes public, present it
+   as a personal/single-operator AgentMesh reference implementation, not a
+   general-purpose secure multi-tenant coordination product. The README
+   should say that plainly up front: trusted callers only, private
+   Tailscale network as the boundary, no anti-spoofing layer, and
+   experimental/personal-infrastructure status.
 
 **Tasks**:
 - [ ] Write `README.md` covering: what this project is (link to `docs/PROBLEM_STATEMENT.md`), quick client setup (register with an already-running mesh), full dev setup (clone/sync/test), and a link out to `docs/OPERATIONS.md` for deploying/operating the Mac-mini side
+- [ ] Include explicit public-use framing: "personal/single-operator reference implementation", "trusted callers only", "not multi-tenant", "not secure against malicious clients", and "experimental/personal infrastructure"
 - [ ] Document per-OS Tailscale client setup differences (macOS/Linux/Windows) needed before any `mcp add` command will resolve the Mac mini's Tailscale IP
 - [ ] Investigate and document (or explicitly scope as follow-up) what's actually needed on the Ollama side to call `http_server.py`'s routes — this is the part with no existing implementation to document, treat it as a design question, not a writing task
 - [ ] Cross-link `README.md` from `AGENTS.md`'s "Documentation layout" section, matching how every other doc in this repo is indexed
 
+### TASK-14: Public-release readiness: security, license, examples, personal-data scrub (PLANNED)
+**Priority**: P2
+**Status**: PLANNED (2026-07-24)
+
+If the repo is made public, do it as a polished reference implementation,
+not as a broadly reusable product/library. `TASK-13` covers the README and
+onboarding story; this task covers the repo-level release hygiene that
+should happen before changing visibility.
+
+**Tasks**:
+- [ ] Add `SECURITY.md` documenting the trust boundary: one operator, trusted callers, private Tailscale network, no authentication/authorization/anti-spoofing inside the app layer
+- [ ] Choose and add a license file
+- [ ] Scrub or template personal deployment details from public-facing docs/examples, including raw Tailscale IPs, local usernames, machine names where not essential, and Jacob-specific paths
+- [ ] Add public-safe example config/commands that use placeholders instead of personal values
+- [ ] Add a status/support statement: experimental personal infrastructure, issues/PR expectations, and what is intentionally out of scope
+- [ ] Run a final public-readiness review over `README.md`, `SECURITY.md`, `docs/OPERATIONS.md`, roadmap, and templates before making the repository public
+
 ## Completed
+
+### ~~TASK-12~~: Persistent launchd service for the Ollama HTTP wrapper (✅ DONE)
+**Priority**: P2
+**Status**: ✅ DONE (2026-07-23)
+
+Mirrored the MCP server's `TASK-10` pattern rather than inventing a new one.
+`agent-mesh-http-server` now shares `agent-mesh-mcp-server`'s
+`validate_mesh_root` and fails fast (exit `2`, clear stderr message) if the
+mesh root doesn't exist, isn't a directory, or isn't writable — closing the
+review finding that `/health_check` could previously create a missing root
+as a side effect. Added a sibling `render_http_launchd_plist.py` and
+`com.jacobmorris.agent-mesh-core.http-server.plist.template`, same
+placeholder set and `RunAtLoad`/`KeepAlive` behavior as the MCP template,
+bound to port `8001` so it doesn't collide with the MCP server's `8000`.
+Rendered and loaded for real on the Mac mini
+(`~/Library/LaunchAgents/com.jacobmorris.agent-mesh-core.http-server.plist`,
+bound to `100.88.189.11:8001`); `launchctl list` shows it running alongside
+the MCP server, and a fresh `launchctl bootstrap` followed by a plain `curl
+-X POST http://100.88.189.11:8001/health_check` returned a real
+`{"status":"ok", ...}` response. `docs/OPERATIONS.md` now documents both
+services side by side. Full test suite: 155 passing, `ruff` clean.
+
+**Tasks**:
+- [x] Add startup validation to `agent-mesh-http-server`, sharing the MCP server's mesh-root validation behavior
+- [x] Add a launchd plist template for `agent-mesh-http-server`, following the existing MCP-server template's structure
+- [x] Render and load it on the Mac mini bound to `100.88.189.11:8001`
+- [x] Verify `/health_check` responds via plain `curl` after a fresh `launchctl bootstrap`
+- [x] Update `docs/OPERATIONS.md` to cover both services, not just the MCP server
 
 ### ~~TASK-10~~: Operational readiness: launchd plist, logging, startup validation (✅ DONE)
 **Priority**: P2
