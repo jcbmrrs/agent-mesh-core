@@ -29,29 +29,12 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-5**~~ | ✅ **Build core TDD package (names, coordinator, inbox, rules_template, bootstrap)** | **P1** | ✅ DONE (2026-07-23) | TASK-4 |
 | ~~**TASK-6**~~ | ✅ **Adversarial code review of TDD build + hardening fixes** | **P1** | ✅ DONE (2026-07-23) | TASK-5 |
 | ~~**TASK-7**~~ | ✅ **Select MCP server framework/SDK, pass the framework-selection gate** | **P1** | ✅ DONE (2026-07-23) | TASK-6 |
-| **FEATURE-8** | **Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools** | **P1** | PLANNED | TASK-7 |
+| ~~**FEATURE-8**~~ | ✅ **Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools** | **P1** | ✅ DONE (2026-07-23) | TASK-7 |
 | **TASK-9** | **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | PLANNED | FEATURE-8 |
 | **TASK-10** | **Operational readiness: launchd plist, logging, startup validation** | **P2** | PLANNED | FEATURE-8 |
 | **TASK-11** | **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | PLANNED | FEATURE-8, TASK-10 |
 
 ## Active Work
-
-### FEATURE-8: Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools (PLANNED)
-**Priority**: P1
-**Status**: PLANNED (2026-07-23)
-
-High priority — this is the actual deliverable the MCP-server pivot exists
-for. Wraps the already-built, already-tested coordinator/inbox/rules_template
-functions as MCP tools per the fixed API design; each tool test is a thin
-spy-isolated dispatch/error-mapping test (the pattern already used for
-`bootstrap_mesh` and `scan_and_clear_inbox`'s composition test), not a
-re-test of logic the existing suite already covers.
-
-**Tasks**:
-- [ ] Expose `acquire_lock`/`release_lock`, `update_state`, `send_message`, `claim_inbox_messages`, `acknowledge_claims`, `read_local_rules`, and `health_check` as MCP tools (never `atomic_write_json`, `recover_processing`, or `bootstrap_mesh`)
-- [ ] Wire the "let it raise, map at the boundary" error-mapping rule for each tool
-- [ ] Add an `agent-mesh-mcp-server` (or similar) console script entry point
-- [ ] TDD-cycle each tool per the plan's placeholder cycle 12, now that the framework is chosen
 
 ### TASK-9: Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer (PLANNED)
 **Priority**: P2
@@ -204,3 +187,27 @@ streamable HTTP the same way. Full rationale recorded in
 **Tasks**:
 - [x] Evaluate candidate MCP server libraries/SDKs against the gate: binding to a specific interface (the Mac mini's Tailscale IP, not just localhost/all-interfaces), timeout/cancellation semantics for a long-running `claim_inbox_messages` call, partial/streamed result support, how it serializes/reports tool-raised errors, and whether it supports the registration path Claude Code and Codex expect
 - [x] Record the decision and rationale in `IMPLEMENTATION_PLAN_v2.md`
+
+### ~~FEATURE-8~~: Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools (✅ DONE)
+**Priority**: P1
+**Status**: ✅ DONE (2026-07-23)
+
+Built `src/agent_mesh_core/mcp_server.py`: `build_server(mesh_root) ->
+FastMCP` exposes exactly the eight documented tools over FastMCP 2.x's
+streamable HTTP transport, backed by a `CoordinatorRegistry` that caches
+one `AgentMeshCoordinator` per `agent_id` and reuses it across calls.
+Exceptions map to `fastmcp.exceptions.ToolError` at the boundary via
+`_map_tool_errors`, carrying the real message through rather than
+FastMCP's default masked fallback. Along the way, moved `health_check`
+from `AgentMeshCoordinator` to the identity-free `MeshJsonWriter` base
+class — it never used `self.agent_id`, and leaving it on
+`AgentMeshCoordinator` would have meant the `health_check` tool creating a
+synthetic agent directory as a side effect of every call. New console
+script `agent-mesh-mcp-server`. Full test suite: 129 passing, `ruff`
+clean.
+
+**Tasks**:
+- [x] Expose `acquire_lock`/`release_lock`, `update_state`, `send_message`, `claim_inbox_messages`, `acknowledge_claims`, `read_local_rules`, and `health_check` as MCP tools (never `atomic_write_json`, `recover_processing`, or `bootstrap_mesh`)
+- [x] Wire the "let it raise, map at the boundary" error-mapping rule for each tool
+- [x] Add an `agent-mesh-mcp-server` console script entry point
+- [x] TDD-cycle each tool (`test_mcp_server.py`), now that the framework is chosen

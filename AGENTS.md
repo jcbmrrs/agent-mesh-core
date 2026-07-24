@@ -83,7 +83,7 @@ The archived `PROMPT.md` names a deployed `/Users/Shared/AgentMesh/agent_core.py
 
 **Caller identity over MCP is an explicit `agent_id` parameter, not derived from session/transport** — there is no anti-spoofing layer, deliberately: every caller is Jacob's own tooling on his own tailnet, and the MCP server binding to the Mac mini's Tailscale interface *is* the stated trust boundary. See `docs/IMPLEMENTATION_PLAN_v2.md`'s "MCP/HTTP API design" section for the full reasoning and for what would need to change if that trust model ever does (shared tailnet, third-party tooling).
 
-The `mcp_server.py` module that wraps the tool-flagged methods above as MCP tools is planned but not yet built — the API surface (tool list, schemas, identity model, lock-handle serialization, ack semantics) is fully decided in `docs/IMPLEMENTATION_PLAN_v2.md`'s "MCP/HTTP API design" and "Operational readiness" sections; only the framework/dispatch plumbing remains.
+The `mcp_server.py` module wraps the tool-flagged methods above as FastMCP 2.x tools over streamable HTTP (`build_server(mesh_root) -> FastMCP`, console script `agent-mesh-mcp-server`). Raised exceptions are mapped to `fastmcp.exceptions.ToolError` at the boundary via `_map_tool_errors`, matching `docs/IMPLEMENTATION_PLAN_v2.md`'s "let it raise, map at the boundary" rule. `health_check` lives on `MeshJsonWriter`, not `AgentMeshCoordinator`, specifically so the tool never creates a synthetic agent identity as a side effect. Remaining: the Ollama HTTP wrapper (`TASK-9`), operational readiness (`TASK-10`), and real deployment/registration over Tailscale (`TASK-11`) — see `docs/ROADMAP.md`.
 
 ## Network/transport notes
 

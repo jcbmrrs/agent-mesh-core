@@ -97,6 +97,50 @@ class MeshJsonWriter:
         finally:
             os.close(dir_fd)
 
+    def health_check(self) -> dict[str, Any]:
+        from agent_mesh_core.inbox import claim_age_seconds, inspect_claim_shape
+
+        agents = []
+        agents_dir = self.mesh_root / "agents"
+        if agents_dir.exists():
+            for agent_dir in sorted([path for path in agents_dir.iterdir() if path.is_dir()]):
+                processing = agent_dir / "inbox" / ".processing"
+                claims = []
+                if processing.exists():
+                    claim_dirs = sorted([path for path in processing.iterdir() if path.is_dir()])
+                    for claim_dir in claim_dirs:
+                        shape, message, sidecar = inspect_claim_shape(claim_dir)
+                        claims.append(
+                            {
+                                "claim_id": claim_dir.name,
+                                "shape": shape,
+                                "age_seconds": claim_age_seconds(
+                                    shape, claim_dir, message, sidecar
+                                ),
+                            }
+                        )
+                agents.append({"agent_id": agent_dir.name, "processing_claims": claims})
+
+        locks = []
+        locks_dir = self.mesh_root / "locks"
+        if locks_dir.exists():
+            for lock_dir in sorted([path for path in locks_dir.iterdir() if path.is_dir()]):
+                shape = "token-present" if (lock_dir / "owner.token").exists() else "token-missing"
+                locks.append(
+                    {
+                        "lock_name": lock_dir.name,
+                        "shape": shape,
+                        "age_seconds": max(0.0, time.time() - lock_dir.stat().st_mtime),
+                    }
+                )
+
+        return {
+            "status": "ok",
+            "mesh_root": str(self.mesh_root),
+            "agents": agents,
+            "locks": locks,
+        }
+
 
 class AgentMeshCoordinator(MeshJsonWriter):
     def __init__(self, mesh_root_path: str | Path, agent_id: str, clock: Any | None = None):
@@ -215,47 +259,3 @@ class AgentMeshCoordinator(MeshJsonWriter):
             raise ValueError("message type must be non-empty and <=64 characters")
         if not re.fullmatch(r"[a-z0-9._-]+", message_type):
             raise ValueError(f"invalid message type {message_type!r}")
-
-    def health_check(self) -> dict[str, Any]:
-        from agent_mesh_core.inbox import claim_age_seconds, inspect_claim_shape
-
-        agents = []
-        agents_dir = self.mesh_root / "agents"
-        if agents_dir.exists():
-            for agent_dir in sorted([path for path in agents_dir.iterdir() if path.is_dir()]):
-                processing = agent_dir / "inbox" / ".processing"
-                claims = []
-                if processing.exists():
-                    claim_dirs = sorted([path for path in processing.iterdir() if path.is_dir()])
-                    for claim_dir in claim_dirs:
-                        shape, message, sidecar = inspect_claim_shape(claim_dir)
-                        claims.append(
-                            {
-                                "claim_id": claim_dir.name,
-                                "shape": shape,
-                                "age_seconds": claim_age_seconds(
-                                    shape, claim_dir, message, sidecar
-                                ),
-                            }
-                        )
-                agents.append({"agent_id": agent_dir.name, "processing_claims": claims})
-
-        locks = []
-        locks_dir = self.mesh_root / "locks"
-        if locks_dir.exists():
-            for lock_dir in sorted([path for path in locks_dir.iterdir() if path.is_dir()]):
-                shape = "token-present" if (lock_dir / "owner.token").exists() else "token-missing"
-                locks.append(
-                    {
-                        "lock_name": lock_dir.name,
-                        "shape": shape,
-                        "age_seconds": max(0.0, time.time() - lock_dir.stat().st_mtime),
-                    }
-                )
-
-        return {
-            "status": "ok",
-            "mesh_root": str(self.mesh_root),
-            "agents": agents,
-            "locks": locks,
-        }
