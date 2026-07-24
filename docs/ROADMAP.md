@@ -108,16 +108,16 @@ placeholder set and `RunAtLoad`/`KeepAlive` behavior as the MCP template,
 bound to port `8001` so it doesn't collide with the MCP server's `8000`.
 Rendered and loaded for real on the Mac mini
 (`~/Library/LaunchAgents/com.jacobmorris.agent-mesh-core.http-server.plist`,
-bound to `100.88.189.11:8001`); `launchctl list` shows it running alongside
+bound to `<mac-mini-tailscale-ip>:8001`); `launchctl list` shows it running alongside
 the MCP server, and a fresh `launchctl bootstrap` followed by a plain `curl
--X POST http://100.88.189.11:8001/health_check` returned a real
+-X POST http://<mac-mini-tailscale-ip>:8001/health_check` returned a real
 `{"status":"ok", ...}` response. `docs/OPERATIONS.md` now documents both
 services side by side. Full test suite: 155 passing, `ruff` clean.
 
 **Tasks**:
 - [x] Add startup validation to `agent-mesh-http-server`, sharing the MCP server's mesh-root validation behavior
 - [x] Add a launchd plist template for `agent-mesh-http-server`, following the existing MCP-server template's structure
-- [x] Render and load it on the Mac mini bound to `100.88.189.11:8001`
+- [x] Render and load it on the Mac mini bound to `<mac-mini-tailscale-ip>:8001`
 - [x] Verify `/health_check` responds via plain `curl` after a fresh `launchctl bootstrap`
 - [x] Update `docs/OPERATIONS.md` to cover both services, not just the MCP server
 
@@ -144,7 +144,7 @@ Deployed for real. `deploy.sh` ran on the Mac mini against
 `/Users/Shared/AgentMesh`, producing the expected tree (three agent
 inboxes, `config/local_rules.json`, `locks/`). Rendered and loaded the MCP
 server's `launchd` plist bound to the Mac mini's Tailscale IP
-(`100.88.189.11:8000`, not the MagicDNS hostname — DNS resolution at
+(`<mac-mini-tailscale-ip>:8000`, not the MagicDNS hostname — DNS resolution at
 `launchd` boot time, before the network is fully up, is a real failure
 mode a raw IP avoids). `claude mcp add --transport http` and `codex mcp
 add --url` both registered the server from the MBP; `claude mcp list`
