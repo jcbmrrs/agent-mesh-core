@@ -15,8 +15,8 @@ rather than a mounted share. See `docs/IMPLEMENTATION_PLAN_v2.md` for the
 full design and `docs/PROBLEM_STATEMENT.md` for why.
 
 **Project**: agent-mesh-core
-**Stack**: Python 3.11+, uv-managed package, pytest + ruff, MCP (server TBD)
-**Status**: In Development — filesystem core built and hardened; MCP layer not yet built
+**Stack**: Python 3.11+, uv-managed package, pytest + ruff, FastMCP 2.x (streamable HTTP) + Starlette/uvicorn
+**Status**: Deployed — MCP server and Ollama HTTP wrapper both built, tested, and verified end-to-end against a real Mac mini + MBP pair over Tailscale. Open follow-up: a persistent `launchd` service for the HTTP wrapper (it currently only runs on demand).
 
 ## Roadmap
 
@@ -32,24 +32,11 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**FEATURE-8**~~ | ✅ **Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools** | **P1** | ✅ DONE (2026-07-23) | TASK-7 |
 | ~~**TASK-9**~~ | ✅ **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | ✅ DONE (2026-07-23) | FEATURE-8 |
 | ~~**TASK-10**~~ | ✅ **Operational readiness: launchd plist, logging, startup validation** | **P2** | ✅ DONE (2026-07-24) | FEATURE-8 |
-| **TASK-11** | **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | 🔄 IN PROGRESS | FEATURE-8, TASK-10 |
+| ~~**TASK-11**~~ | ✅ **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | ✅ DONE (2026-07-23) | FEATURE-8, TASK-10 |
 
 ## Active Work
 
-### TASK-11: Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end (PLANNED)
-**Priority**: P1
-**Status**: PLANNED (2026-07-23)
-
-High priority — this is the actual goal of the whole project: agents on
-different machines coordinating through the mesh for real, not just a
-tested local library. Depends on the MCP server existing and having a
-supervised way to run.
-
-**Tasks**:
-- [ ] Run `deploy.sh` on the Mac mini against the real mesh root
-- [ ] Register the MCP server with Claude Code and Codex from the MBP over Tailscale
-- [ ] Exercise `send_message` + `claim_inbox_messages`/`acknowledge_claims` across a real pair of machines
-- [ ] Confirm the Ollama HTTP wrapper works from a local script on at least one non-MCP machine
+_Nothing in progress._
 
 ## Completed
 
@@ -67,6 +54,32 @@ runs at all during development.
 - [x] Redirect stdout/stderr to a log file (no rotation infra in v1)
 - [x] Add startup validation: mesh root exists/is a directory/is writable, fail fast with a clear error otherwise
 - [x] Verify `health_check()`'s real output against a running server
+
+### ~~TASK-11~~: Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end (✅ DONE)
+**Priority**: P1
+**Status**: ✅ DONE (2026-07-23)
+
+Deployed for real. `deploy.sh` ran on the Mac mini against
+`/Users/Shared/AgentMesh`, producing the expected tree (three agent
+inboxes, `config/local_rules.json`, `locks/`). Rendered and loaded the MCP
+server's `launchd` plist bound to the Mac mini's Tailscale IP
+(`100.88.189.11:8000`, not the MagicDNS hostname — DNS resolution at
+`launchd` boot time, before the network is fully up, is a real failure
+mode a raw IP avoids). `claude mcp add --transport http` and `codex mcp
+add --url` both registered the server from the MBP; `claude mcp list`
+confirmed `✔ Connected`. Exercised a real `send_message` →
+`claim_inbox_messages` → `acknowledge_claims` round trip from the MBP
+through the live server. Started the Ollama HTTP wrapper manually
+(`agent-mesh-http-server`, port 8001), confirmed the same three-call round
+trip via plain `curl` — no MCP client needed — then stopped it (no
+persistent service for it yet; that's optional follow-up work, not part
+of this task's scope).
+
+**Tasks**:
+- [x] Run `deploy.sh` on the Mac mini against the real mesh root
+- [x] Register the MCP server with Claude Code and Codex from the MBP over Tailscale
+- [x] Exercise `send_message` + `claim_inbox_messages`/`acknowledge_claims` across a real pair of machines
+- [x] Confirm the Ollama HTTP wrapper works from a local script on at least one non-MCP machine
 
 ### ~~TASK-1~~: Problem statement, solution research, MCP-server pivot decision (✅ DONE)
 **Priority**: P1
