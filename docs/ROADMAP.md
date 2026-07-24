@@ -28,28 +28,13 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-4**~~ | ✅ **IMPLEMENTATION_PLAN v2 hardening: three adversarial review rounds** | **P1** | ✅ DONE (2026-07-23) | TASK-3 |
 | ~~**TASK-5**~~ | ✅ **Build core TDD package (names, coordinator, inbox, rules_template, bootstrap)** | **P1** | ✅ DONE (2026-07-23) | TASK-4 |
 | ~~**TASK-6**~~ | ✅ **Adversarial code review of TDD build + hardening fixes** | **P1** | ✅ DONE (2026-07-23) | TASK-5 |
-| **TASK-7** | **Select MCP server framework/SDK, pass the framework-selection gate** | **P1** | PLANNED | TASK-6 |
+| ~~**TASK-7**~~ | ✅ **Select MCP server framework/SDK, pass the framework-selection gate** | **P1** | ✅ DONE (2026-07-23) | TASK-6 |
 | **FEATURE-8** | **Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools** | **P1** | PLANNED | TASK-7 |
 | **TASK-9** | **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | PLANNED | FEATURE-8 |
 | **TASK-10** | **Operational readiness: launchd plist, logging, startup validation** | **P2** | PLANNED | FEATURE-8 |
 | **TASK-11** | **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | PLANNED | FEATURE-8, TASK-10 |
 
 ## Active Work
-
-### TASK-7: Select MCP server framework/SDK, pass the framework-selection gate (PLANNED)
-**Priority**: P1
-**Status**: PLANNED (2026-07-23)
-
-High priority — this blocks all other MCP work. `IMPLEMENTATION_PLAN_v2.md`'s
-"MCP/HTTP API design" section already fixed every behavioral decision
-(tool list, caller-identity model, lock-handle serialization, inbox
-claim/acknowledge semantics, error-mapping rule) — what's left is picking
-an actual library and checking it against the gate that same section
-defines, before writing any dispatch code.
-
-**Tasks**:
-- [ ] Evaluate candidate MCP server libraries/SDKs against the gate: binding to a specific interface (the Mac mini's Tailscale IP, not just localhost/all-interfaces), timeout/cancellation semantics for a long-running `claim_inbox_messages` call, partial/streamed result support, how it serializes/reports tool-raised errors, and whether it supports the registration path Claude Code and Codex expect
-- [ ] Record the decision and rationale in `IMPLEMENTATION_PLAN_v2.md`
 
 ### FEATURE-8: Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools (PLANNED)
 **Priority**: P1
@@ -199,3 +184,23 @@ all of them with new regression tests.
 - [x] Fix `acknowledge_claims` batch-abort bug and empty-claim-dir cleanup gap
 - [x] Remove undocumented `claimant_agent_id` parameter
 - [x] Add concurrency, boundary, and negative-assertion tests (120 tests passing)
+
+### ~~TASK-7~~: Select MCP server framework/SDK, pass the framework-selection gate (✅ DONE)
+**Priority**: P1
+**Status**: ✅ DONE (2026-07-23)
+
+Evaluated the official `mcp` SDK's built-in `FastMCP` against FastMCP 2.x
+(`fastmcp`, jlowin/PrefectHQ) over streamable HTTP, against the gate
+`IMPLEMENTATION_PLAN_v2.md`'s "MCP/HTTP API design" section defined.
+Decided on **FastMCP 2.x over streamable HTTP**: both pass the gate, but
+FastMCP 2.x has the cleaner error-mapping story (`ToolError` vs. masked
+generic exceptions, mapping directly onto the "let it raise, map at the
+boundary" rule) and is currently stable, while the official SDK is
+mid-major-rework. Confirmed both Claude Code (`claude mcp add --transport
+http`) and Codex (`codex mcp add --url`) register remote MCP servers over
+streamable HTTP the same way. Full rationale recorded in
+`IMPLEMENTATION_PLAN_v2.md`'s "MCP/HTTP API design" section.
+
+**Tasks**:
+- [x] Evaluate candidate MCP server libraries/SDKs against the gate: binding to a specific interface (the Mac mini's Tailscale IP, not just localhost/all-interfaces), timeout/cancellation semantics for a long-running `claim_inbox_messages` call, partial/streamed result support, how it serializes/reports tool-raised errors, and whether it supports the registration path Claude Code and Codex expect
+- [x] Record the decision and rationale in `IMPLEMENTATION_PLAN_v2.md`

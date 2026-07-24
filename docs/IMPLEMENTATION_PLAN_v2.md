@@ -40,20 +40,21 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   recovery), `rules_template.py` (write **and** read), `bootstrap.py`.
 - **Named in the repo layout but not yet cycled:** `mcp_server.py`,
   wrapping the runtime-facing coordinator methods as MCP tools, and its
-  HTTP-wrapper counterpart for Ollama tooling. The exact
-  tool-registration/dispatch *mechanics* (which SDK/framework, request
-  routing, server bootstrapping) need their own design pass once a
-  framework is chosen — the coordinator logic needs to exist and pass its
-  own tests before there's real code to wrap. **What's no longer deferred:
-  the API surface itself** — the tool list, request/response shapes,
-  caller-identity model, lock-handle serialization, and inbox
-  delivery/acknowledgement semantics are all decided below (see "MCP/HTTP
-  API design"), in response to `docs/archive/PLAN_FEEDBACK-v2.md`'s
-  finding that treating the MCP layer as a thin wrapper understated it:
-  it's the mesh's actual security/identity/reliability boundary, and that
-  needed a design
-  decision, not a placeholder. Only the plumbing (which library, how
-  tools get registered) stays deferred to when a module actually exists to
+  HTTP-wrapper counterpart for Ollama tooling. The library is decided
+  (FastMCP 2.x / `fastmcp`, streamable HTTP — see the "Decision
+  (2026-07-23)" in "MCP/HTTP API design" below); what's left is the actual
+  tool-registration/dispatch *wiring* (routing, server bootstrapping,
+  re-raising our exceptions as `ToolError`) — the coordinator logic needed
+  to exist and pass its own tests before there was real code to wrap.
+  **What was never deferred: the API surface itself** — the tool list,
+  request/response shapes, caller-identity model, lock-handle
+  serialization, and inbox delivery/acknowledgement semantics are all
+  decided below (see "MCP/HTTP API design"), in response to
+  `docs/archive/PLAN_FEEDBACK-v2.md`'s finding that treating the MCP layer
+  as a thin wrapper understated it: it's the mesh's actual
+  security/identity/reliability boundary, and that needed a design
+  decision, not a placeholder. Only the plumbing (how tools get
+  registered) stays deferred to when a module actually exists to
   cycle.
 - **Not in scope, dropped entirely (not deferred):** any SMB-share
   provisioning tooling (`sharing`/`dscl` command generation). No client
@@ -430,6 +431,54 @@ gap.
   framework's docs before committing, not a research project — but it's a
   real gate, not a formality.
 
+**Decision (2026-07-23): FastMCP 2.x (the `fastmcp` PyPI package,
+jlowin/PrefectHQ), over streamable HTTP.** Checked against the gate above:
+
+1. **Binding**: `mcp.run(transport="streamable-http", host=..., port=...)`
+   supports binding to a specific interface — including a previously-fixed
+   issue where `host` wasn't being passed through to the SDK's own
+   DNS-rebinding-protection logic, only to the underlying ASGI server.
+   The fact that issue existed and got fixed is itself a good sign: someone
+   else already needed exactly our scenario (a real bound interface, not a
+   proxy-fronted localhost).
+2. **Timeout/cancellation**: client-side `timeout=` on tool calls and
+   server-side `ctx.report_progress()` are both supported over
+   streamable-http. One real, documented gap: a client timing out mid-call
+   can raise `ClosedResourceError` that crashes the server process. This is
+   mitigated by design rather than avoided — `TASK-10`'s `launchd`
+   `KeepAlive` restart plus the fact that all coordinator state lives on
+   disk (a crash-restart loses no lock/claim state, per "Operational
+   readiness" below) makes this an acceptable-but-real risk, not a
+   blocker. `mcp_server.py`'s own build should still wrap tool dispatch
+   defensively rather than relying solely on the restart safety net.
+3. **Partial/streamed results**: supported via progress callbacks; not
+   needed for anything in our tool list, since every tool is already
+   bounded (`max_messages=50`, 256 KiB/message) — a non-issue given the
+   API surface already decided above.
+4. **Error serialization**: FastMCP 2.x distinguishes a plain raised
+   exception (caught, masked to a generic client-facing message —
+   `mask_error_details=True` by default, good for not leaking internals)
+   from `ToolError` (message passed through verbatim). This maps directly
+   onto the "let it raise, map at the boundary" rule: catch our specific
+   exceptions (`ValueError`, `FileNotFoundError`, etc.) at the tool
+   boundary and re-raise as `ToolError(str(exc))`, so callers get the
+   actual reason rather than a masked generic message.
+5. **Registration path**: confirmed for both clients — `claude mcp add
+   --transport http <name> <url>` and `codex mcp add --url <url>`, both
+   using streamable HTTP as the current recommended remote transport
+   (SSE is deprecated on the Claude Code side, and stdio is the wrong
+   model here anyway — it means a client-spawned local process, not one
+   shared server reached by multiple remote machines).
+
+**Why FastMCP 2.x over the official SDK's built-in `FastMCP`**: both
+pass the gate, but the official `modelcontextprotocol/python-sdk` is
+mid-major-rework (v2 targeted essentially now, alongside a new spec
+release), meaning adopting it today means adopting a package about to
+churn. FastMCP 2.x is the currently-stable, more feature-complete option
+(clearer error-masking story, more deployment documentation), and is
+itself descended from the same code the official SDK's basic `FastMCP`
+class originated from.
+
 ## Operational readiness
 
 A persistent daemon needs an operational story, not just correct logic.
@@ -663,20 +712,18 @@ wrapper, for Ollama tooling) that fronts it.
 ### Integration (smoke-level, not micro-cycled)
 11. `test_bootstrap_integration.py` — one end-to-end run of `bootstrap_mesh` against `tmp_path` asserting the full real directory tree + a valid `local_rules.json`, for the three default agent ids (`agent_mac_mini`, `agent_mbp`, `agent_ollama_local`). No code-deployment shim exists or is tested — the live share is data-only.
 
-### `mcp_server.py` (follow-up build, design already fixed above)
-12. Not yet TDD-cycled, but no longer an open design question on *behavior*:
-    the tool list, request/response shapes, identity model, lock-handle
-    serialization, and inbox ack semantics are all fixed in "MCP/HTTP API
-    design" above. What's deferred is choosing an MCP server library/SDK,
-    passing it through that section's framework-selection gate (binding
-    mode, timeout/cancellation, error serialization, partial-result
-    support, Claude Code/Codex compatibility), then wiring its
-    tool-registration API to the functions named above and mapping raised
-    exceptions to that framework's error shape — real work with its own
-    behavioral consequences, not a fungible detail, which is exactly why
-    that gate exists rather than skipping straight to cycling tests here.
-    Cycle this once that library choice is made and has passed the gate —
-    each tool becomes a thin test asserting it calls the right coordinator/
+### `mcp_server.py` (follow-up build; design and framework choice both fixed above)
+12. Not yet TDD-cycled, but no longer an open design question on
+    *behavior* or *framework*: the tool list, request/response shapes,
+    identity model, lock-handle serialization, and inbox ack semantics are
+    all fixed in "MCP/HTTP API design" above, and the library is decided
+    (FastMCP 2.x / `fastmcp`, streamable HTTP — see "Decision
+    (2026-07-23)" in that section). What's left is wiring FastMCP's
+    tool-registration API to the functions named above, re-raising our
+    specific exceptions as `fastmcp.exceptions.ToolError` at the boundary
+    (per the error-serialization decision), and configuring `mcp.run(
+    transport="streamable-http", host=<mac mini's Tailscale IP>, port=...)`.
+    Cycle this now that the library choice is made — each tool becomes a thin test asserting it calls the right coordinator/
     inbox/rules_template function with the right arguments and maps its
     exceptions correctly (spy-isolated, the same pattern already used for
     `bootstrap_mesh` and `scan_and_clear_inbox`'s composition test above),
