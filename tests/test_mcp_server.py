@@ -6,12 +6,53 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from agent_mesh_core import AgentMeshCoordinator
-from agent_mesh_core.mcp_server import EXPOSED_TOOL_NAMES, build_server
+from agent_mesh_core.mcp_server import EXPOSED_TOOL_NAMES, build_server, main, validate_mesh_root
 from agent_mesh_core.rules_template import write_local_rules_template
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_validate_mesh_root_rejects_missing_path(tmp_path):
+    missing = tmp_path / "missing"
+
+    with pytest.raises(ValueError, match="does not exist"):
+        validate_mesh_root(missing)
+
+    assert not missing.exists()
+
+
+def test_validate_mesh_root_rejects_file(tmp_path):
+    mesh_root = tmp_path / "mesh"
+    mesh_root.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a directory"):
+        validate_mesh_root(mesh_root)
+
+
+def test_validate_mesh_root_rejects_failed_write_probe(tmp_path, monkeypatch):
+    mesh_root = tmp_path / "mesh"
+    mesh_root.mkdir()
+
+    def fail_write_probe(*args, **kwargs):
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("agent_mesh_core.mcp_server.tempfile.NamedTemporaryFile", fail_write_probe)
+
+    with pytest.raises(ValueError, match="not writable"):
+        validate_mesh_root(mesh_root)
+
+
+def test_main_validates_mesh_root_before_building_server(tmp_path, monkeypatch):
+    missing = tmp_path / "missing"
+
+    def fail_if_called(mesh_root):
+        raise AssertionError(f"build_server should not be called for {mesh_root}")
+
+    monkeypatch.setattr("agent_mesh_core.mcp_server.build_server", fail_if_called)
+
+    assert main(["--mesh-root", str(missing)]) == 2
 
 
 def test_exposes_exactly_the_documented_tool_set(mesh_root):

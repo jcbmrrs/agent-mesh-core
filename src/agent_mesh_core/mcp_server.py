@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import functools
+import os
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +23,22 @@ EXPOSED_TOOL_NAMES = EXPOSED_OPERATIONS
 # FastMCP's generic masked message - see IMPLEMENTATION_PLAN_v2.md's "let it
 # raise, map at the boundary" rule.
 _MAPPED_EXCEPTIONS = (ValueError, FileNotFoundError, NotADirectoryError, FileExistsError)
+
+
+def validate_mesh_root(mesh_root: str | Path) -> Path:
+    path = Path(mesh_root)
+    if not path.exists():
+        raise ValueError(f"mesh root {path} does not exist")
+    if not path.is_dir():
+        raise ValueError(f"mesh root {path} is not a directory")
+    if not os.access(path, os.W_OK | os.X_OK):
+        raise ValueError(f"mesh root {path} is not writable")
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".startup_check_", dir=path, delete=True):
+            pass
+    except OSError:
+        raise ValueError(f"mesh root {path} is not writable")
+    return path
 
 
 def _map_tool_errors(fn):
@@ -100,7 +119,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
 
-    server = build_server(args.mesh_root)
+    try:
+        mesh_root = validate_mesh_root(args.mesh_root)
+    except ValueError as exc:
+        print(f"agent-mesh-mcp-server: {exc}", file=sys.stderr)
+        return 2
+
+    server = build_server(mesh_root)
     server.run(transport="streamable-http", host=args.host, port=args.port)
     return 0
 

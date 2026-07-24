@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,7 @@ _STATUS_FOR_EXCEPTION: dict[type[Exception], int] = {
     FileNotFoundError: 404,
     NotADirectoryError: 409,
     FileExistsError: 409,
+    TypeError: 400,
 }
 
 
@@ -35,9 +37,14 @@ def _status_for(exc: Exception) -> int | None:
 
 def _handler(fn: Callable[[dict[str, Any]], Any]) -> Callable[[Request], Any]:
     async def endpoint(request: Request) -> JSONResponse:
-        body = await request.json() if await request.body() else {}
         try:
+            body_bytes = await request.body()
+            body = json.loads(body_bytes) if body_bytes else {}
+            if not isinstance(body, dict):
+                raise ValueError("request body must be a JSON object")
             result = fn(body)
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "malformed JSON request body"}, status_code=400)
         except tuple(_STATUS_FOR_EXCEPTION) as exc:
             status = _status_for(exc)
             return JSONResponse({"error": str(exc)}, status_code=status)

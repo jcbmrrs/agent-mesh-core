@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jacobmorris.agent-mesh-core.mcp-server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__UV_BIN__</string>
+    <string>run</string>
+    <string>agent-mesh-mcp-server</string>
+    <string>--mesh-root</string>
+    <string>__MESH_ROOT__</string>
+    <string>--host</string>
+    <string>__TAILSCALE_HOST__</string>
+    <string>--port</string>
+    <string>__PORT__</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>UV_CACHE_DIR</key>
+    <string>__REPO_DIR__/.uv-cache</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/mcp_server.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/mcp_server.err.log</string>
+</dict>
+</plist>

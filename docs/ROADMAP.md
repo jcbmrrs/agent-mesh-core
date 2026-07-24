@@ -46,10 +46,10 @@ SRE runbook. Needed before the server runs unattended, but not before it
 runs at all during development.
 
 **Tasks**:
-- [ ] Write a `launchd` plist (`RunAtLoad` + `KeepAlive`) for the MCP server on the Mac mini
-- [ ] Redirect stdout/stderr to a log file (no rotation infra in v1)
-- [ ] Add startup validation: mesh root exists/is a directory/is writable, fail fast with a clear error otherwise
-- [ ] Verify `health_check()`'s real output against a running server
+- [x] Write a `launchd` plist (`RunAtLoad` + `KeepAlive`) for the MCP server on the Mac mini
+- [x] Redirect stdout/stderr to a log file (no rotation infra in v1)
+- [x] Add startup validation: mesh root exists/is a directory/is writable, fail fast with a clear error otherwise
+- [x] Verify `health_check()`'s real output against a running server
 
 ### TASK-11: Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end (PLANNED)
 **Priority**: P1

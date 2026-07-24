@@ -119,6 +119,34 @@ def test_acquire_lock_route_maps_invalid_name_to_400(mesh_root):
     assert "error" in response.json()
 
 
+def test_route_maps_missing_required_arguments_to_400(mesh_root):
+    with _client(mesh_root) as client:
+        response = client.post("/acquire_lock", json={})
+
+    assert response.status_code == 400
+    assert "missing" in response.json()["error"]
+
+
+def test_route_maps_non_object_json_to_400(mesh_root):
+    with _client(mesh_root) as client:
+        response = client.post("/acquire_lock", json=[])
+
+    assert response.status_code == 400
+    assert "JSON object" in response.json()["error"]
+
+
+def test_route_maps_malformed_json_to_400(mesh_root):
+    with _client(mesh_root) as client:
+        response = client.post(
+            "/acquire_lock",
+            content="not-json",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert "malformed JSON" in response.json()["error"]
+
+
 def test_claim_and_acknowledge_routes_round_trip(mesh_root):
     sender = AgentMeshCoordinator(mesh_root, "agent_b")
     AgentMeshCoordinator(mesh_root, "agent_a")
