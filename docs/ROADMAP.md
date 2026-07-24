@@ -53,7 +53,17 @@ MCP-server-specific — either generalize it or add a sibling
 its own port (8001, as used in the `TASK-11` smoke test) so it doesn't
 collide with the MCP server's port 8000.
 
+Review finding after `TASK-11`: unlike `agent-mesh-mcp-server`,
+`agent-mesh-http-server` currently does not validate `--mesh-root` before
+starting. A bad path can run until the first request fails confusingly, and
+`/health_check` can instantiate `MeshJsonWriter`, creating a missing root as
+a side effect. Fix this as part of making the HTTP wrapper persistent:
+reuse/share the MCP startup validation behavior so the HTTP service also
+fails fast when the mesh root does not exist, is not a directory, or is not
+writable.
+
 **Tasks**:
+- [ ] Add startup validation to `agent-mesh-http-server`, sharing the MCP server's mesh-root validation behavior
 - [ ] Add a launchd plist template for `agent-mesh-http-server`, following the existing MCP-server template's structure
 - [ ] Render and load it on the Mac mini bound to `100.88.189.11:8001`
 - [ ] Verify `/health_check` responds via plain `curl` after a fresh `launchctl bootstrap` (not just while a manually-started process happened to still be running)
