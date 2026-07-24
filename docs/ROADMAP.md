@@ -31,25 +31,10 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-7**~~ | ✅ **Select MCP server framework/SDK, pass the framework-selection gate** | **P1** | ✅ DONE (2026-07-23) | TASK-6 |
 | ~~**FEATURE-8**~~ | ✅ **Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools** | **P1** | ✅ DONE (2026-07-23) | TASK-7 |
 | ~~**TASK-9**~~ | ✅ **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | ✅ DONE (2026-07-23) | FEATURE-8 |
-| **TASK-10** | **Operational readiness: launchd plist, logging, startup validation** | **P2** | IN PROGRESS (2026-07-24) | FEATURE-8 |
-| **TASK-11** | **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | PLANNED | FEATURE-8, TASK-10 |
+| ~~**TASK-10**~~ | ✅ **Operational readiness: launchd plist, logging, startup validation** | **P2** | ✅ DONE (2026-07-24) | FEATURE-8 |
+| **TASK-11** | **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | 🔄 IN PROGRESS | FEATURE-8, TASK-10 |
 
 ## Active Work
-
-### TASK-10: Operational readiness: launchd plist, logging, startup validation (IN PROGRESS)
-**Priority**: P2
-**Status**: IN PROGRESS (2026-07-24)
-
-Scoped for a single-operator, 2–3-machine personal mesh per
-`IMPLEMENTATION_PLAN_v2.md`'s "Operational readiness" section — not a full
-SRE runbook. Needed before the server runs unattended, but not before it
-runs at all during development.
-
-**Tasks**:
-- [x] Write a `launchd` plist (`RunAtLoad` + `KeepAlive`) for the MCP server on the Mac mini
-- [x] Redirect stdout/stderr to a log file (no rotation infra in v1)
-- [x] Add startup validation: mesh root exists/is a directory/is writable, fail fast with a clear error otherwise
-- [x] Verify `health_check()`'s real output against a running server
 
 ### TASK-11: Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end (PLANNED)
 **Priority**: P1
@@ -67,6 +52,21 @@ supervised way to run.
 - [ ] Confirm the Ollama HTTP wrapper works from a local script on at least one non-MCP machine
 
 ## Completed
+
+### ~~TASK-10~~: Operational readiness: launchd plist, logging, startup validation (✅ DONE)
+**Priority**: P2
+**Status**: ✅ DONE (2026-07-24)
+
+Scoped for a single-operator, 2–3-machine personal mesh per
+`IMPLEMENTATION_PLAN_v2.md`'s "Operational readiness" section — not a full
+SRE runbook. Needed before the server runs unattended, but not before it
+runs at all during development.
+
+**Tasks**:
+- [x] Write a `launchd` plist (`RunAtLoad` + `KeepAlive`) for the MCP server on the Mac mini
+- [x] Redirect stdout/stderr to a log file (no rotation infra in v1)
+- [x] Add startup validation: mesh root exists/is a directory/is writable, fail fast with a clear error otherwise
+- [x] Verify `health_check()`'s real output against a running server
 
 ### ~~TASK-1~~: Problem statement, solution research, MCP-server pivot decision (✅ DONE)
 **Priority**: P1
