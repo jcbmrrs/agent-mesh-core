@@ -34,60 +34,10 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-10**~~ | ✅ **Operational readiness: launchd plist, logging, startup validation** | **P2** | ✅ DONE (2026-07-24) | FEATURE-8 |
 | ~~**TASK-11**~~ | ✅ **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | ✅ DONE (2026-07-23) | FEATURE-8, TASK-10 |
 | ~~**TASK-12**~~ | ✅ **Persistent launchd service for the Ollama HTTP wrapper** | **P2** | ✅ DONE (2026-07-23) | TASK-11 |
-| **TASK-13** | **README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps** | **P2** | PLANNED | TASK-11 |
+| ~~**TASK-13**~~ | ✅ **README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps** | **P2** | ✅ DONE (2026-07-24) | TASK-11 |
 | **TASK-14** | **Public-release readiness: security, license, examples, personal-data scrub** | **P2** | PLANNED | TASK-13 |
 
 ## Active Work
-
-### TASK-13: README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps (PLANNED)
-**Priority**: P2
-**Status**: PLANNED (2026-07-23)
-
-No root `README.md` exists yet — everything usable today is scattered
-across `AGENTS.md`, `docs/IMPLEMENTATION_PLAN_v2.md`, and
-`docs/OPERATIONS.md`, none of which is written as an onboarding doc for
-someone setting up a *new* client machine. Two distinct audiences, both
-in scope:
-
-1. **Getting a new machine talking to the already-deployed mesh** (the
-   common case — Mac mini is already running both services after
-   `TASK-11`/`TASK-12`): per-OS steps to install Claude Code/Codex and
-   register the MCP server (`claude mcp add --transport http`, `codex mcp
-   add --url`, using the Mac mini's Tailscale IP), covering macOS, Linux,
-   and Windows client differences (Tailscale client install/login on each
-   OS is the only real per-platform variance — the MCP registration
-   commands themselves are OS-agnostic).
-2. **Ollama-specific integration steps beyond the persistent HTTP wrapper
-   itself** (`TASK-12`) — Ollama doesn't speak MCP and has no native
-   "call this HTTP endpoint before/after inference" hook, so this needs
-   to document whatever glue actually exists: a wrapper script or thin
-   local proxy that Ollama-side tooling invokes to reach
-   `http_server.py`'s routes (`send_message`, `claim_inbox_messages`,
-   etc.), how such a script authenticates/identifies itself as
-   `agent_ollama_local` (the agent ID `bootstrap_mesh` already
-   provisions), and where that script would live/run relative to Ollama
-   itself. This is design work as much as documentation — there's no
-   existing Ollama-side integration to describe yet, so the "steps needed
-   to implement this in Ollama" part of this task may surface real
-   follow-up scope (a new script or task) rather than just being written
-   up after the fact.
-3. **Full from-scratch setup** for a machine that will *run* the Mac-mini
-   role somewhere else, or a from-scratch clone for local development:
-   `git clone` + `uv sync`, running the test suite, `deploy.sh`'s env-var
-   overrides (`MESH_ROOT`, `AGENT_IDS`).
-4. **Public-facing positioning**: if this repo becomes public, present it
-   as a personal/single-operator AgentMesh reference implementation, not a
-   general-purpose secure multi-tenant coordination product. The README
-   should say that plainly up front: trusted callers only, private
-   Tailscale network as the boundary, no anti-spoofing layer, and
-   experimental/personal-infrastructure status.
-
-**Tasks**:
-- [ ] Write `README.md` covering: what this project is (link to `docs/PROBLEM_STATEMENT.md`), quick client setup (register with an already-running mesh), full dev setup (clone/sync/test), and a link out to `docs/OPERATIONS.md` for deploying/operating the Mac-mini side
-- [ ] Include explicit public-use framing: "personal/single-operator reference implementation", "trusted callers only", "not multi-tenant", "not secure against malicious clients", and "experimental/personal infrastructure"
-- [ ] Document per-OS Tailscale client setup differences (macOS/Linux/Windows) needed before any `mcp add` command will resolve the Mac mini's Tailscale IP
-- [ ] Investigate and document (or explicitly scope as follow-up) what's actually needed on the Ollama side to call `http_server.py`'s routes — this is the part with no existing implementation to document, treat it as a design question, not a writing task
-- [ ] Cross-link `README.md` from `AGENTS.md`'s "Documentation layout" section, matching how every other doc in this repo is indexed
 
 ### TASK-14: Public-release readiness: security, license, examples, personal-data scrub (PLANNED)
 **Priority**: P2
@@ -107,6 +57,27 @@ should happen before changing visibility.
 - [ ] Run a final public-readiness review over `README.md`, `SECURITY.md`, `docs/OPERATIONS.md`, roadmap, and templates before making the repository public
 
 ## Completed
+
+### ~~TASK-13~~: README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps (✅ DONE)
+**Priority**: P2
+**Status**: ✅ DONE (2026-07-24)
+
+Added a root `README.md` for human onboarding. It explains what the project
+is, states the single-operator/private-tailnet trust model, links to the
+problem statement, implementation plan, operations guide, and roadmap, and
+covers new-client setup, per-OS Tailscale notes, Mac-mini host setup,
+development commands, and the current Ollama integration shape. The Ollama
+section documents the real state clearly: the HTTP wrapper exists, but an
+automatic Ollama-side wrapper/proxy is still follow-up integration work if
+needed. Updated `AGENTS.md` so cold-start agents know the repo is
+implemented and that `README.md` is the user-facing onboarding doc.
+
+**Tasks**:
+- [x] Write `README.md` covering: what this project is (link to `docs/PROBLEM_STATEMENT.md`), quick client setup (register with an already-running mesh), full dev setup (clone/sync/test), and a link out to `docs/OPERATIONS.md` for deploying/operating the Mac-mini side
+- [x] Include explicit public-use framing: "personal/single-operator reference implementation", "trusted callers only", "not multi-tenant", "not secure against malicious clients", and "experimental/personal infrastructure"
+- [x] Document per-OS Tailscale client setup differences (macOS/Linux/Windows) needed before any `mcp add` command will resolve the Mac mini's Tailscale IP
+- [x] Investigate and document (or explicitly scope as follow-up) what's actually needed on the Ollama side to call `http_server.py`'s routes — this is the part with no existing implementation to document, treat it as a design question, not a writing task
+- [x] Cross-link `README.md` from `AGENTS.md`'s "Documentation layout" section, matching how every other doc in this repo is indexed
 
 ### ~~TASK-12~~: Persistent launchd service for the Ollama HTTP wrapper (✅ DONE)
 **Priority**: P2
