@@ -28,7 +28,7 @@ Deployment-specific values:
 - `__TAILSCALE_HOST__`: the Mac mini Tailscale IP or MagicDNS bind host
 - `__PORT__`: MCP server port, normally `8000`
 - `__LOG_DIR__`: log directory, normally
-  `/Users/jacobmorris/Library/Logs/agent-mesh-core`
+  `~/Library/Logs/agent-mesh-core`
 
 The plist runs:
 

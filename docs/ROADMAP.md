@@ -35,28 +35,42 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-11**~~ | ✅ **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | ✅ DONE (2026-07-23) | FEATURE-8, TASK-10 |
 | ~~**TASK-12**~~ | ✅ **Persistent launchd service for the Ollama HTTP wrapper** | **P2** | ✅ DONE (2026-07-23) | TASK-11 |
 | ~~**TASK-13**~~ | ✅ **README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps** | **P2** | ✅ DONE (2026-07-24) | TASK-11 |
-| **TASK-14** | **Public-release readiness: security, license, examples, personal-data scrub** | **P2** | PLANNED | TASK-13 |
+| ~~**TASK-14**~~ | ✅ **Public-release readiness: security, license, examples, personal-data scrub** | **P2** | ✅ DONE (2026-07-23) | TASK-13 |
 
 ## Active Work
 
-### TASK-14: Public-release readiness: security, license, examples, personal-data scrub (PLANNED)
-**Priority**: P2
-**Status**: PLANNED (2026-07-24)
-
-If the repo is made public, do it as a polished reference implementation,
-not as a broadly reusable product/library. `TASK-13` covers the README and
-onboarding story; this task covers the repo-level release hygiene that
-should happen before changing visibility.
-
-**Tasks**:
-- [ ] Add `SECURITY.md` documenting the trust boundary: one operator, trusted callers, private Tailscale network, no authentication/authorization/anti-spoofing inside the app layer
-- [ ] Choose and add a license file
-- [ ] Scrub or template personal deployment details from public-facing docs/examples, including raw Tailscale IPs, local usernames, machine names where not essential, and Jacob-specific paths
-- [ ] Add public-safe example config/commands that use placeholders instead of personal values
-- [ ] Add a status/support statement: experimental personal infrastructure, issues/PR expectations, and what is intentionally out of scope
-- [ ] Run a final public-readiness review over `README.md`, `SECURITY.md`, `docs/OPERATIONS.md`, roadmap, and templates before making the repository public
+No open tasks. See `## Completed` below or run `/waypoint:add` to file new work.
 
 ## Completed
+
+### ~~TASK-14~~: Public-release readiness: security, license, examples, personal-data scrub (✅ DONE)
+**Priority**: P2
+**Status**: ✅ DONE (2026-07-23)
+
+Added `LICENSE` (MIT) and `SECURITY.md`, the latter stating the trust model
+explicitly: one operator, trusted callers only, private Tailscale network as
+the sole boundary, no authentication/authorization/anti-spoofing at the app
+layer, and what the filesystem/locking layer does still defend against
+regardless of that model. Scrubbed the one remaining personal path
+(`/Users/jacobmorris/Library/Logs/agent-mesh-core` → `~/Library/Logs/agent-mesh-core`)
+from `docs/OPERATIONS.md`; confirmed `README.md` (written under `TASK-13`)
+already used `<mac-mini-tailscale-host>`-style placeholders throughout, so
+no further scrubbing was needed there. Added a "Status & Support" section
+and a License section to `README.md`. Left `com.jacobmorris.*` launchd
+bundle IDs and historical real-IP mentions inside completed `## Completed`
+write-ups as-is: the bundle ID is a reverse-DNS namespace tied to real
+deployed plist filenames (renaming it is a live-deployment migration, not a
+privacy fix, and Jacob's identity is already public via the repo/commit
+metadata), and the historical entries are an audit trail of what was
+actually deployed, not reusable setup instructions.
+
+**Tasks**:
+- [x] Add `SECURITY.md` documenting the trust boundary: one operator, trusted callers, private Tailscale network, no authentication/authorization/anti-spoofing inside the app layer
+- [x] Choose and add a license file
+- [x] Scrub or template personal deployment details from public-facing docs/examples, including raw Tailscale IPs, local usernames, machine names where not essential, and Jacob-specific paths
+- [x] Add public-safe example config/commands that use placeholders instead of personal values
+- [x] Add a status/support statement: experimental personal infrastructure, issues/PR expectations, and what is intentionally out of scope
+- [x] Run a final public-readiness review over `README.md`, `SECURITY.md`, `docs/OPERATIONS.md`, roadmap, and templates before making the repository public
 
 ### ~~TASK-13~~: README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps (✅ DONE)
 **Priority**: P2

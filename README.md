@@ -201,3 +201,17 @@ UV_CACHE_DIR=.uv-cache uv run agent-mesh-recover-processing --mesh-root /tmp/Age
 Runtime paths such as `agents/`, `locks/`, and live `config/*.json` files
 are ignored by git. Keep the live mesh as data-only; source code and
 templates belong in this repository.
+
+## Status & Support
+
+This is experimental personal infrastructure, maintained in spare time for a
+single operator's own machines — not a supported product with an SLA.
+Issues and PRs are welcome, but there's no commitment on response time, and
+feature requests outside the single-operator/private-tailnet scope
+described in [Trust Model](#trust-model) are likely to be declined rather
+than accepted. See [SECURITY.md](SECURITY.md) for the trust boundary and how
+to report a real security concern.
+
+## License
+
+[MIT](LICENSE)
