@@ -43,11 +43,16 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 Secondary consumer — Ollama-backed local tooling doesn't speak MCP, so it
 needs a thin HTTP route set over the same underlying functions. Lower
 priority than the MCP layer itself since Claude Code/Codex over MCP is the
-primary use case; this can follow once FEATURE-8's dispatch layer exists to
-share rather than duplicate.
+primary use case. The prerequisite this task needed is already done:
+`src/agent_mesh_core/dispatch.py`'s `MeshDispatch` class was extracted out
+of `mcp_server.py` specifically so this task has a real, transport-agnostic
+layer to import — its methods raise the underlying exceptions unmapped, so
+this task's own job is purely mapping those to HTTP status codes at its own
+boundary, the same pattern `mcp_server.py` already uses for `ToolError`.
 
 **Tasks**:
-- [ ] Stand up HTTP routes mirroring the MCP tool list, reusing FEATURE-8's dispatch/error-mapping code rather than reimplementing it
+- [ ] Stand up HTTP routes mirroring `dispatch.EXPOSED_OPERATIONS`, calling `MeshDispatch` directly (no new coordinator/inbox call logic)
+- [ ] Map `MeshDispatch`'s unmapped exceptions to HTTP status codes at this wrapper's own boundary
 - [ ] Bind to the Mac mini's Tailscale interface, same as the MCP server
 
 ### TASK-10: Operational readiness: launchd plist, logging, startup validation (PLANNED)

@@ -38,7 +38,8 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
 - **In scope, fully cycled below:** `names.py`, `coordinator.py`
   (locks, atomic writes, state, messaging, `health_check`), `inbox.py`
   (claim, acknowledge, recovery), `rules_template.py` (write **and**
-  read), `bootstrap.py`, `mcp_server.py` (FastMCP 2.x tool layer over
+  read), `bootstrap.py`, `dispatch.py` (the transport-agnostic
+  `MeshDispatch` layer), `mcp_server.py` (FastMCP 2.x tool layer over
   streamable HTTP — see "Decision (2026-07-23)" in "MCP/HTTP API design"
   below for the framework choice). The tool list, request/response
   shapes, caller-identity model, lock-handle serialization, and inbox
@@ -49,9 +50,9 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   security/identity/reliability boundary, and that needed a design
   decision, not a placeholder.
 - **Named in the repo layout but not yet built:** the Ollama HTTP wrapper
-  (`TASK-9`) — a thin route set over the same functions `mcp_server.py`
-  already wraps, sharing its dispatch/error-mapping code rather than
-  duplicating it.
+  (`TASK-9`) — a thin route set calling `dispatch.py`'s `MeshDispatch`
+  directly, mapping its unmapped exceptions to HTTP status codes at its
+  own boundary, rather than duplicating any coordinator/inbox call logic.
 - **Not in scope, dropped entirely (not deferred):** any SMB-share
   provisioning tooling (`sharing`/`dscl` command generation). No client
   ever mounts the mesh root, so there is nothing to provision.
@@ -552,7 +553,8 @@ agent-mesh-core/
 │   ├── inbox.py             # claim_inbox_messages / acknowledge_claims (claim_token-checked) + InboxScanResult (claim into .processing/<claim_id>/ dirs) + scan_and_clear_inbox (local convenience wrapper) + recover_processing() + recover_main() CLI entrypoint
 │   ├── rules_template.py    # local_rules.json generator/writer + read_local_rules() reader
 │   ├── bootstrap.py         # bootstrap_mesh(): wires coordinator init + rules template + default agent dirs
-│   ├── mcp_server.py        # build_server(mesh_root) -> FastMCP: wraps acquire_lock/release_lock/update_state/send_message/claim_inbox_messages/acknowledge_claims/read_local_rules/health_check as FastMCP 2.x tools over streamable HTTP; CoordinatorRegistry caches one AgentMeshCoordinator per agent_id; _map_tool_errors re-raises ValueError/FileNotFoundError/NotADirectoryError/FileExistsError as ToolError
+│   ├── dispatch.py          # MeshDispatch: transport-agnostic layer over coordinator/inbox/rules_template, shared by mcp_server.py and (later) the Ollama HTTP wrapper; CoordinatorRegistry caches one AgentMeshCoordinator per agent_id; raises the underlying exceptions unmapped - each transport maps them at its own boundary
+│   ├── mcp_server.py        # build_server(mesh_root) -> FastMCP: registers MeshDispatch's 8 operations as FastMCP 2.x tools over streamable HTTP; _map_tool_errors re-raises ValueError/FileNotFoundError/NotADirectoryError/FileExistsError as fastmcp.exceptions.ToolError, MCP-specific, at this module's own boundary
 │   └── templates/
 │       └── local_rules.template.json
 └── tests/
@@ -570,15 +572,26 @@ agent-mesh-core/
     ├── test_rules_template.py
     ├── test_bootstrap.py
     ├── test_bootstrap_integration.py
+    ├── test_dispatch.py
     └── test_mcp_server.py
 ```
 
 `health_check()` lives on `MeshJsonWriter` (the identity-free base class), not
-`AgentMeshCoordinator`, precisely so `mcp_server.py`'s `health_check` tool
-can call it without constructing a synthetic per-agent identity as a side
-effect — it never touched `self.agent_id` in the first place, so the move
-changes nothing about `AgentMeshCoordinator.health_check()`'s existing,
-tested behavior (inherited unchanged).
+`AgentMeshCoordinator`, precisely so `MeshDispatch.health_check()` can call
+it without constructing a synthetic per-agent identity as a side effect —
+it never touched `self.agent_id` in the first place, so the move changes
+nothing about `AgentMeshCoordinator.health_check()`'s existing, tested
+behavior (inherited unchanged).
+
+`dispatch.py` was extracted out of `mcp_server.py` specifically so the
+Ollama HTTP wrapper (`TASK-9`) has something real to share rather than a
+promise to share something later — `MeshDispatch`'s methods do exactly
+what the underlying coordinator/inbox/rules_template calls do and raise
+exactly what they raise, unmapped; each transport (FastMCP tools here,
+HTTP routes in the wrapper) maps those exceptions to its own error shape
+at its own boundary. `CoordinatorRegistry` moved with it, since caching
+one `AgentMeshCoordinator` per `agent_id` is exactly as transport-agnostic
+as everything else in this module.
 
 Every machine either runs the MCP server (Mac mini only) or reaches it as
 a registered MCP client (everyone else); the live share never contains
@@ -716,33 +729,44 @@ wrapper, for Ollama tooling) that fronts it.
 ### Integration (smoke-level, not micro-cycled)
 11. `test_bootstrap_integration.py` — one end-to-end run of `bootstrap_mesh` against `tmp_path` asserting the full real directory tree + a valid `local_rules.json`, for the three default agent ids (`agent_mac_mini`, `agent_mbp`, `agent_ollama_local`). No code-deployment shim exists or is tested — the live share is data-only.
 
-### `mcp_server.py` (built)
-12. `test_mcp_server.py` — `build_server(mesh_root) -> FastMCP` registers
-    exactly `EXPOSED_TOOL_NAMES` (`acquire_lock`, `release_lock`,
-    `update_state`, `send_message`, `claim_inbox_messages`,
-    `acknowledge_claims`, `read_local_rules`, `health_check`) and nothing
-    else — a dedicated test asserts `recover_processing`, `bootstrap_mesh`,
-    and `atomic_write_json` are absent from `client.list_tools()`. Each
-    tool is exercised end-to-end against a real `tmp_path` mesh root via
-    FastMCP's in-memory `Client` (the same "real filesystem, light
-    mocking" convention the rest of this suite uses, not heavy spy
-    isolation) — one happy-path test per tool plus one error-mapping test
-    proving a raised `ValueError`/`FileNotFoundError`/etc. surfaces to the
-    client as a `fastmcp.exceptions.ToolError` carrying the real message
-    (via `_map_tool_errors`, not FastMCP's default masked-message
-    fallback). `CoordinatorRegistry` caches one `AgentMeshCoordinator` per
-    `agent_id` string, constructed lazily on first use and reused for
-    every later call with that same `agent_id` — a lock round-trip test
-    (`acquire_lock` → blocked second acquire → `release_lock` →
-    reacquire) and a claim/acknowledge round-trip test both cross multiple
-    tool calls to prove the registry's reuse is real, not per-call
-    reconstruction. `health_check` is built on the identity-free
-    `MeshJsonWriter` rather than going through the registry, specifically
-    so calling it never creates a synthetic agent directory as a side
-    effect (see the "Repo layout" note on why `health_check` moved to
-    `MeshJsonWriter`). The Ollama HTTP wrapper (`TASK-9`) is separate,
-    follow-up scope, sharing this module's tool functions and
-    `_map_tool_errors` rather than duplicating them.
+### `dispatch.py` and `mcp_server.py` (built)
+12. `test_dispatch.py` — `MeshDispatch(mesh_root)` exercises each of its
+    eight methods against a real `tmp_path` mesh root and asserts they
+    raise the *unmapped* underlying exception (`FileNotFoundError` for a
+    missing target inbox, `ValueError` for an invalid lock name) — proving
+    this layer does no MCP-specific (or any transport-specific) error
+    mapping itself, which is the entire point of it being shared.
+    `CoordinatorRegistry` caches one `AgentMeshCoordinator` per `agent_id`
+    string, constructed lazily on first use and reused for every later
+    call with that same `agent_id` — asserted directly (`registry.get("x")
+    is registry.get("x")`). `health_check` is built on the identity-free
+    `MeshJsonWriter` rather than going through the registry — a dedicated
+    test confirms calling it creates no synthetic agent directory as a
+    side effect. `EXPOSED_OPERATIONS` (the eight-name set) is asserted
+    equal to `mcp_server.EXPOSED_TOOL_NAMES`, so the two modules can't
+    silently drift apart.
+13. `test_mcp_server.py` — `build_server(mesh_root) -> FastMCP` registers
+    each `MeshDispatch` method as a FastMCP tool under the matching name
+    and nothing else — a dedicated test asserts `recover_processing`,
+    `bootstrap_mesh`, and `atomic_write_json` are absent from
+    `client.list_tools()`. Each tool is exercised end-to-end against a
+    real `tmp_path` mesh root via FastMCP's in-memory `Client` (the same
+    "real filesystem, light mocking" convention the rest of this suite
+    uses, not heavy spy isolation) — one happy-path test per tool plus one
+    error-mapping test proving a raised `ValueError`/`FileNotFoundError`/
+    etc. surfaces to the client as a `fastmcp.exceptions.ToolError`
+    carrying the real message (via `_map_tool_errors`, not FastMCP's
+    default masked-message fallback) — this module's own tests don't
+    re-assert the dispatch-layer behavior `test_dispatch.py` already
+    covers (registry reuse, unmapped exceptions), only that FastMCP
+    registration and this module's own error-mapping wrap `MeshDispatch`
+    correctly. A lock round-trip test (`acquire_lock` → blocked second
+    acquire → `release_lock` → reacquire) and a claim/acknowledge
+    round-trip test both cross multiple tool calls as an integration-level
+    sanity check. The Ollama HTTP wrapper (`TASK-9`) is separate,
+    follow-up scope: it imports `MeshDispatch` directly and maps its
+    unmapped exceptions to HTTP status codes at its own boundary, the same
+    pattern `mcp_server.py` uses for `ToolError`.
 
 ## Tooling setup
 
