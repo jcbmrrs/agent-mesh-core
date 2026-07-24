@@ -41,7 +41,8 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   read), `bootstrap.py`, `dispatch.py` (the transport-agnostic
   `MeshDispatch` layer), `mcp_server.py` (FastMCP 2.x tool layer over
   streamable HTTP — see "Decision (2026-07-23)" in "MCP/HTTP API design"
-  below for the framework choice). The tool list, request/response
+  below for the framework choice), `http_server.py` (Starlette route
+  layer for Ollama tooling, `TASK-9`). The tool list, request/response
   shapes, caller-identity model, lock-handle serialization, and inbox
   delivery/acknowledgement semantics were all decided ahead of the build
   (see "MCP/HTTP API design"), in response to
@@ -49,10 +50,6 @@ incremental derivation, and `docs/PROBLEM_STATEMENT.md` /
   as a thin wrapper understated it: it's the mesh's actual
   security/identity/reliability boundary, and that needed a design
   decision, not a placeholder.
-- **Named in the repo layout but not yet built:** the Ollama HTTP wrapper
-  (`TASK-9`) — a thin route set calling `dispatch.py`'s `MeshDispatch`
-  directly, mapping its unmapped exceptions to HTTP status codes at its
-  own boundary, rather than duplicating any coordinator/inbox call logic.
 - **Not in scope, dropped entirely (not deferred):** any SMB-share
   provisioning tooling (`sharing`/`dscl` command generation). No client
   ever mounts the mesh root, so there is nothing to provision.
@@ -555,6 +552,7 @@ agent-mesh-core/
 │   ├── bootstrap.py         # bootstrap_mesh(): wires coordinator init + rules template + default agent dirs
 │   ├── dispatch.py          # MeshDispatch: transport-agnostic layer over coordinator/inbox/rules_template, shared by mcp_server.py and (later) the Ollama HTTP wrapper; CoordinatorRegistry caches one AgentMeshCoordinator per agent_id; raises the underlying exceptions unmapped - each transport maps them at its own boundary
 │   ├── mcp_server.py        # build_server(mesh_root) -> FastMCP: registers MeshDispatch's 8 operations as FastMCP 2.x tools over streamable HTTP; _map_tool_errors re-raises ValueError/FileNotFoundError/NotADirectoryError/FileExistsError as fastmcp.exceptions.ToolError, MCP-specific, at this module's own boundary
+│   ├── http_server.py       # build_app(mesh_root) -> Starlette: registers MeshDispatch's 8 operations as POST routes for Ollama tooling; maps the same exceptions to HTTP status codes (400/404/409) at this module's own boundary
 │   └── templates/
 │       └── local_rules.template.json
 └── tests/
@@ -573,7 +571,8 @@ agent-mesh-core/
     ├── test_bootstrap.py
     ├── test_bootstrap_integration.py
     ├── test_dispatch.py
-    └── test_mcp_server.py
+    ├── test_mcp_server.py
+    └── test_http_server.py
 ```
 
 `health_check()` lives on `MeshJsonWriter` (the identity-free base class), not
@@ -584,11 +583,12 @@ nothing about `AgentMeshCoordinator.health_check()`'s existing, tested
 behavior (inherited unchanged).
 
 `dispatch.py` was extracted out of `mcp_server.py` specifically so the
-Ollama HTTP wrapper (`TASK-9`) has something real to share rather than a
-promise to share something later — `MeshDispatch`'s methods do exactly
-what the underlying coordinator/inbox/rules_template calls do and raise
-exactly what they raise, unmapped; each transport (FastMCP tools here,
-HTTP routes in the wrapper) maps those exceptions to its own error shape
+Ollama HTTP wrapper (`TASK-9`, built — see `http_server.py`) had something
+real to share rather than a promise to share something later —
+`MeshDispatch`'s methods do exactly what the underlying coordinator/
+inbox/rules_template calls do and raise exactly what they raise,
+unmapped; each transport (FastMCP tools in `mcp_server.py`, Starlette
+routes in `http_server.py`) maps those exceptions to its own error shape
 at its own boundary. `CoordinatorRegistry` moved with it, since caching
 one `AgentMeshCoordinator` per `agent_id` is exactly as transport-agnostic
 as everything else in this module.
@@ -763,10 +763,26 @@ wrapper, for Ollama tooling) that fronts it.
     correctly. A lock round-trip test (`acquire_lock` → blocked second
     acquire → `release_lock` → reacquire) and a claim/acknowledge
     round-trip test both cross multiple tool calls as an integration-level
-    sanity check. The Ollama HTTP wrapper (`TASK-9`) is separate,
-    follow-up scope: it imports `MeshDispatch` directly and maps its
-    unmapped exceptions to HTTP status codes at its own boundary, the same
-    pattern `mcp_server.py` uses for `ToolError`.
+    sanity check.
+
+### `http_server.py` (built)
+14. `test_http_server.py` — `build_app(mesh_root) -> Starlette` registers
+    one POST route per `MeshDispatch` operation
+    (`/acquire_lock`, `/release_lock`, `/update_state`, `/send_message`,
+    `/claim_inbox_messages`, `/acknowledge_claims`, `/read_local_rules`,
+    `/health_check`) and nothing else — a dedicated test asserts the route
+    path set equals `dispatch.EXPOSED_OPERATIONS` exactly. Exercised via
+    Starlette's synchronous `TestClient` against a real `tmp_path` mesh
+    root, same "real filesystem, light mocking" convention as
+    `test_mcp_server.py` — one happy-path test per route plus error-mapping
+    tests proving `ValueError` → `400`, `FileNotFoundError` → `404`, each
+    returning `{"error": <message>}` rather than a bare 500. Like
+    `test_mcp_server.py`, this file doesn't re-assert `test_dispatch.py`'s
+    own coverage (registry reuse, unmapped exceptions) — only that routing
+    and this module's own status-code mapping wrap `MeshDispatch`
+    correctly. `starlette`/`uvicorn` were already transitive dependencies
+    via `fastmcp`; added as direct dependencies since this module imports
+    them directly rather than relying on another package's pin.
 
 ## Tooling setup
 
@@ -798,8 +814,12 @@ wrapper, for Ollama tooling) that fronts it.
 - `test_mcp_server.py` now covers every exposed tool against a real
   `tmp_path` mesh root via FastMCP's in-memory `Client` — happy path,
   error-mapping to `ToolError`, and the exact-tool-set assertion.
-- Not yet covered here (deferred to `TASK-9`/`TASK-11` in `docs/ROADMAP.md`):
-  the Ollama HTTP wrapper, `launchd` restart behavior, and live tool
-  registration reachable from a real Claude Code/Codex client over
-  Tailscale (in-memory `Client` tests prove the tool layer is wired
-  correctly, not that a real network deployment on the Mac mini works).
+- `test_http_server.py` now covers every exposed route against a real
+  `tmp_path` mesh root via Starlette's `TestClient` — happy path,
+  error-mapping to HTTP status codes, and the exact-route-set assertion.
+- Not yet covered here (deferred to `TASK-11` in `docs/ROADMAP.md`):
+  `launchd` restart behavior and live tool/route registration reachable
+  from a real Claude Code/Codex client (and a real local Ollama script)
+  over Tailscale — in-memory/`TestClient` tests prove both transport
+  layers are wired correctly, not that a real network deployment on the
+  Mac mini works.

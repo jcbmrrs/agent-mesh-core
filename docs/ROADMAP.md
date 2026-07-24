@@ -30,34 +30,15 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-6**~~ | ✅ **Adversarial code review of TDD build + hardening fixes** | **P1** | ✅ DONE (2026-07-23) | TASK-5 |
 | ~~**TASK-7**~~ | ✅ **Select MCP server framework/SDK, pass the framework-selection gate** | **P1** | ✅ DONE (2026-07-23) | TASK-6 |
 | ~~**FEATURE-8**~~ | ✅ **Build mcp_server.py: wrap coordinator/inbox/rules_template as MCP tools** | **P1** | ✅ DONE (2026-07-23) | TASK-7 |
-| **TASK-9** | **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | PLANNED | FEATURE-8 |
-| **TASK-10** | **Operational readiness: launchd plist, logging, startup validation** | **P2** | PLANNED | FEATURE-8 |
+| ~~**TASK-9**~~ | ✅ **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | ✅ DONE (2026-07-23) | FEATURE-8 |
+| **TASK-10** | **Operational readiness: launchd plist, logging, startup validation** | **P2** | IN PROGRESS (2026-07-24) | FEATURE-8 |
 | **TASK-11** | **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | PLANNED | FEATURE-8, TASK-10 |
 
 ## Active Work
 
-### TASK-9: Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer (PLANNED)
+### TASK-10: Operational readiness: launchd plist, logging, startup validation (IN PROGRESS)
 **Priority**: P2
-**Status**: PLANNED (2026-07-23)
-
-Secondary consumer — Ollama-backed local tooling doesn't speak MCP, so it
-needs a thin HTTP route set over the same underlying functions. Lower
-priority than the MCP layer itself since Claude Code/Codex over MCP is the
-primary use case. The prerequisite this task needed is already done:
-`src/agent_mesh_core/dispatch.py`'s `MeshDispatch` class was extracted out
-of `mcp_server.py` specifically so this task has a real, transport-agnostic
-layer to import — its methods raise the underlying exceptions unmapped, so
-this task's own job is purely mapping those to HTTP status codes at its own
-boundary, the same pattern `mcp_server.py` already uses for `ToolError`.
-
-**Tasks**:
-- [ ] Stand up HTTP routes mirroring `dispatch.EXPOSED_OPERATIONS`, calling `MeshDispatch` directly (no new coordinator/inbox call logic)
-- [ ] Map `MeshDispatch`'s unmapped exceptions to HTTP status codes at this wrapper's own boundary
-- [ ] Bind to the Mac mini's Tailscale interface, same as the MCP server
-
-### TASK-10: Operational readiness: launchd plist, logging, startup validation (PLANNED)
-**Priority**: P2
-**Status**: PLANNED (2026-07-23)
+**Status**: IN PROGRESS (2026-07-24)
 
 Scoped for a single-operator, 2–3-machine personal mesh per
 `IMPLEMENTATION_PLAN_v2.md`'s "Operational readiness" section — not a full
@@ -216,3 +197,32 @@ clean.
 - [x] Wire the "let it raise, map at the boundary" error-mapping rule for each tool
 - [x] Add an `agent-mesh-mcp-server` console script entry point
 - [x] TDD-cycle each tool (`test_mcp_server.py`), now that the framework is chosen
+
+### ~~TASK-9~~: Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer (✅ DONE)
+**Priority**: P2
+**Status**: ✅ DONE (2026-07-23)
+
+Built `src/agent_mesh_core/http_server.py`: `build_app(mesh_root) ->
+Starlette` exposes exactly the eight documented operations as POST routes
+(`/acquire_lock`, `/release_lock`, `/update_state`, `/send_message`,
+`/claim_inbox_messages`, `/acknowledge_claims`, `/read_local_rules`,
+`/health_check`), each calling `MeshDispatch` directly with no new
+coordinator/inbox call logic — the `dispatch.py` extraction from FEATURE-8
+paid off exactly as intended, and this landed with zero changes to
+`mcp_server.py` despite TASK-10 editing that same file concurrently.
+`MeshDispatch`'s unmapped exceptions are mapped to HTTP status codes at
+this wrapper's own boundary (`ValueError` → 400, `FileNotFoundError` →
+404, `NotADirectoryError`/`FileExistsError` → 409) — the same
+"let it raise, map at the boundary" rule `mcp_server.py` applies for
+`ToolError`, just a different target shape. `starlette`/`uvicorn` were
+already transitive deps via `fastmcp`; added as direct dependencies since
+this module imports them directly. New console script
+`agent-mesh-http-server` (`--mesh-root`, `--host`, `--port` — bind to the
+Mac mini's Tailscale interface at deploy time, same as the MCP server;
+actual deployment is `TASK-11`'s job). Full test suite: 149 passing,
+`ruff` clean.
+
+**Tasks**:
+- [x] Stand up HTTP routes mirroring `dispatch.EXPOSED_OPERATIONS`, calling `MeshDispatch` directly (no new coordinator/inbox call logic)
+- [x] Map `MeshDispatch`'s unmapped exceptions to HTTP status codes at this wrapper's own boundary
+- [x] Bind to the Mac mini's Tailscale interface, same as the MCP server (CLI supports `--host`/`--port`; real deployment is `TASK-11`)
