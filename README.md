@@ -183,9 +183,15 @@ curl -sS -X POST \
   }'
 ```
 
-The exact Ollama-side wrapper script is intentionally not built yet. Treat
-that as follow-up integration work if you want Ollama workflows to
-participate automatically rather than through explicit scripts.
+A reference poller that closes this loop end-to-end — claiming inbox
+messages, routing them to a local Ollama model, and replying to the
+sender — lives at
+[examples/ollama/mesh_poller.py](examples/ollama/mesh_poller.py), with
+the task-routing rationale (what's a good fit for Ollama vs. what should
+stay on Claude Code/Codex) in
+[examples/ollama/README.md](examples/ollama/README.md). It's example
+code, not a deployed service — copy it into your own always-on process
+(launchd/systemd) if you want it running continuously.
 
 ## Development
 

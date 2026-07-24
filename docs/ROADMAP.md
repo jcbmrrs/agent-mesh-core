@@ -36,12 +36,49 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-12**~~ | ✅ **Persistent launchd service for the Ollama HTTP wrapper** | **P2** | ✅ DONE (2026-07-23) | TASK-11 |
 | ~~**TASK-13**~~ | ✅ **README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps** | **P2** | ✅ DONE (2026-07-24) | TASK-11 |
 | ~~**TASK-14**~~ | ✅ **Public-release readiness: security, license, examples, personal-data scrub** | **P2** | ✅ DONE (2026-07-23) | TASK-13 |
+| ~~**TASK-15**~~ | ✅ **Ollama task-routing example: reference poller + integration docs** | **P3** | ✅ DONE (2026-07-23) | TASK-9 |
 
 ## Active Work
 
 No open tasks. See `## Completed` below or run `/waypoint:add` to file new work.
 
 ## Completed
+
+### ~~TASK-15~~: Ollama task-routing example: reference poller + integration docs (✅ DONE)
+**Priority**: P3
+**Status**: ✅ DONE (2026-07-23)
+
+Added `examples/ollama/mesh_poller.py`, a stdlib-only reference poller
+closing the loop `README.md`'s "Ollama Integration" section previously
+flagged as unbuilt follow-up work: it claims `agent_ollama_local`'s
+inbox via `POST /claim_inbox_messages`, routes `mesh.ollama.task`
+messages to a local Ollama server's `/api/generate`, replies to the
+sender (or an explicit `reply_to`) via `POST /send_message`, and
+acknowledges every claim via `POST /acknowledge_claims` — the same
+claim-then-acknowledge contract every other caller uses, just driven
+from outside the mesh over the HTTP wrapper. No new dependency: uses
+`urllib` rather than adding `requests`, matching the minimal footprint
+in `pyproject.toml`.
+
+`examples/ollama/README.md` documents the task-routing judgment call
+this is meant to demonstrate — route high-volume, low-stakes work
+(bulk summarization, the poll loop itself, draft-then-review,
+inbox pre-filtering/triage) to the zero-marginal-cost, no-session-limit
+local model, and keep anything correctness-critical (logic changes,
+anything touching the lock/claim/atomic-write invariants) on Claude
+Code/Codex. `README.md`'s "Ollama Integration" section now links to both
+files instead of describing the wrapper as unbuilt.
+
+Explicitly out of scope here (unchanged from TASK-13's framing): this is
+example code the operator runs or adapts manually, not a `launchd`-managed
+always-on service — turning it into one, if wanted, is separate follow-up
+work, not something this task silently expanded into.
+
+**Tasks**:
+- [x] Confirm the exact `http_server.py` routes/payload shapes (`dispatch.py`) before writing example code against them, rather than guessing
+- [x] Write a reference poller demonstrating claim → route to Ollama → reply → acknowledge, using only the stdlib
+- [x] Document the task-routing rationale (what's a good fit for local Ollama vs. what stays on a paid-session agent) alongside the example
+- [x] Update `README.md`'s "Ollama Integration" section to point at the example instead of describing the wrapper as unbuilt
 
 ### ~~TASK-14~~: Public-release readiness: security, license, examples, personal-data scrub (✅ DONE)
 **Priority**: P2
