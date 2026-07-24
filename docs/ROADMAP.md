@@ -33,10 +33,74 @@ full design and `docs/PROBLEM_STATEMENT.md` for why.
 | ~~**TASK-9**~~ | ✅ **Build Ollama HTTP wrapper sharing mcp_server.py's dispatch layer** | **P2** | ✅ DONE (2026-07-23) | FEATURE-8 |
 | ~~**TASK-10**~~ | ✅ **Operational readiness: launchd plist, logging, startup validation** | **P2** | ✅ DONE (2026-07-24) | FEATURE-8 |
 | ~~**TASK-11**~~ | ✅ **Deploy to Mac mini, register with Claude Code/Codex over Tailscale, verify end-to-end** | **P1** | ✅ DONE (2026-07-23) | FEATURE-8, TASK-10 |
+| **TASK-12** | **Persistent launchd service for the Ollama HTTP wrapper** | **P2** | PLANNED | TASK-11 |
+| **TASK-13** | **README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps** | **P2** | PLANNED | TASK-11 |
 
 ## Active Work
 
-_Nothing in progress._
+### TASK-12: Persistent launchd service for the Ollama HTTP wrapper (PLANNED)
+**Priority**: P2
+**Status**: PLANNED (2026-07-23)
+
+`TASK-11` confirmed `http_server.py` works correctly, but only started
+manually (`agent-mesh-http-server`, foreground, stopped by hand). It has
+no `launchd` plist, unlike the MCP server (`TASK-10`). Mirror that
+existing pattern rather than inventing a new one: same template-render
+approach (`deploy/launchd/render_mcp_launchd_plist.py` is
+MCP-server-specific — either generalize it or add a sibling
+`render_http_launchd_plist.py`), same log-directory convention, same
+`RunAtLoad`/`KeepAlive` behavior, bound to the Mac mini's Tailscale IP on
+its own port (8001, as used in the `TASK-11` smoke test) so it doesn't
+collide with the MCP server's port 8000.
+
+**Tasks**:
+- [ ] Add a launchd plist template for `agent-mesh-http-server`, following the existing MCP-server template's structure
+- [ ] Render and load it on the Mac mini bound to `100.88.189.11:8001`
+- [ ] Verify `/health_check` responds via plain `curl` after a fresh `launchctl bootstrap` (not just while a manually-started process happened to still be running)
+- [ ] Update `docs/OPERATIONS.md` (or wherever `TASK-10`'s launchd docs live) to cover both services, not just the MCP server
+
+### TASK-13: README.md: install/run on new Mac, Linux, Windows machines + Ollama integration steps (PLANNED)
+**Priority**: P2
+**Status**: PLANNED (2026-07-23)
+
+No root `README.md` exists yet — everything usable today is scattered
+across `AGENTS.md`, `docs/IMPLEMENTATION_PLAN_v2.md`, and
+`docs/OPERATIONS.md`, none of which is written as an onboarding doc for
+someone setting up a *new* client machine. Two distinct audiences, both
+in scope:
+
+1. **Getting a new machine talking to the already-deployed mesh** (the
+   common case — Mac mini is already running both services after
+   `TASK-11`/`TASK-12`): per-OS steps to install Claude Code/Codex and
+   register the MCP server (`claude mcp add --transport http`, `codex mcp
+   add --url`, using the Mac mini's Tailscale IP), covering macOS, Linux,
+   and Windows client differences (Tailscale client install/login on each
+   OS is the only real per-platform variance — the MCP registration
+   commands themselves are OS-agnostic).
+2. **Ollama-specific integration steps beyond the persistent HTTP wrapper
+   itself** (`TASK-12`) — Ollama doesn't speak MCP and has no native
+   "call this HTTP endpoint before/after inference" hook, so this needs
+   to document whatever glue actually exists: a wrapper script or thin
+   local proxy that Ollama-side tooling invokes to reach
+   `http_server.py`'s routes (`send_message`, `claim_inbox_messages`,
+   etc.), how such a script authenticates/identifies itself as
+   `agent_ollama_local` (the agent ID `bootstrap_mesh` already
+   provisions), and where that script would live/run relative to Ollama
+   itself. This is design work as much as documentation — there's no
+   existing Ollama-side integration to describe yet, so the "steps needed
+   to implement this in Ollama" part of this task may surface real
+   follow-up scope (a new script or task) rather than just being written
+   up after the fact.
+3. **Full from-scratch setup** for a machine that will *run* the Mac-mini
+   role somewhere else, or a from-scratch clone for local development:
+   `git clone` + `uv sync`, running the test suite, `deploy.sh`'s env-var
+   overrides (`MESH_ROOT`, `AGENT_IDS`).
+
+**Tasks**:
+- [ ] Write `README.md` covering: what this project is (link to `docs/PROBLEM_STATEMENT.md`), quick client setup (register with an already-running mesh), full dev setup (clone/sync/test), and a link out to `docs/OPERATIONS.md` for deploying/operating the Mac-mini side
+- [ ] Document per-OS Tailscale client setup differences (macOS/Linux/Windows) needed before any `mcp add` command will resolve the Mac mini's Tailscale IP
+- [ ] Investigate and document (or explicitly scope as follow-up) what's actually needed on the Ollama side to call `http_server.py`'s routes — this is the part with no existing implementation to document, treat it as a design question, not a writing task
+- [ ] Cross-link `README.md` from `AGENTS.md`'s "Documentation layout" section, matching how every other doc in this repo is indexed
 
 ## Completed
 
